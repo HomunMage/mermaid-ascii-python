@@ -12,15 +12,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            archive: mermaid-ascii-python-linux-x86_64.tar.gz
-          - target: aarch64-unknown-linux-gnu
-            archive: mermaid-ascii-python-linux-aarch64.tar.gz
-          - target: x86_64-pc-windows-gnu
-            archive: mermaid-ascii-python-windows-x86_64.zip
 
     steps:
       - name: Checkout
@@ -29,64 +20,22 @@ jobs:
       - name: Build with Docker
         run: |
           docker buildx build \
-            --build-arg TARGET=${{ matrix.target }} \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
             --output type=local,dest=./out .
 
-      - name: Package (tar.gz)
-        if: "!contains(matrix.archive, '.zip')"
-        run: tar czf ${{ matrix.archive }} -C out .
-
-      - name: Package (zip)
-        if: contains(matrix.archive, '.zip')
-        run: cd out && zip -r ../${{ matrix.archive }} .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
-
-  build-macos:
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            archive: mermaid-ascii-python-macos-aarch64.tar.gz
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Build
-        run: uv build
-
       - name: Package
-        run: tar czf ${{ matrix.archive }} -C dist .
+        run: tar czf mermaid-ascii-python-dist.tar.gz -C out .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
+          name: mermaid-ascii-python-dist.tar.gz
+          path: mermaid-ascii-python-dist.tar.gz
 
   release:
     runs-on: ubuntu-latest
-    needs: [build, build-macos]
+    needs: [build]
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
