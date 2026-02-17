@@ -1,7 +1,6 @@
 #!/bin/bash
-# orchestrator.sh — Continuous agent loop
-# Keeps running worker cycles until all phases are complete
-# Usage: ./scripts/orchestrator.sh [max_cycles]
+# orchestrator.sh — Continuous agent loop running in tmux
+# Spawns worker in the same tmux session, monitors via trigger file
 
 cd "$(dirname "$0")/.." || exit 1
 PROJECT_DIR="$(pwd)"
@@ -10,54 +9,62 @@ LOG_FILE="${PROJECT_DIR}/out/orchestrator.log"
 MAX_CYCLES="${1:-50}"
 CYCLE=0
 
+# Source Rust
+. "$HOME/.cargo/env" 2>/dev/null || true
+
 mkdir -p out
 
-echo "========================================" | tee -a "$LOG_FILE"
-echo "Orchestrator started at $(date)" | tee -a "$LOG_FILE"
-echo "Max cycles: ${MAX_CYCLES}" | tee -a "$LOG_FILE"
-echo "========================================" | tee -a "$LOG_FILE"
+log() {
+  echo "$(date '+%H:%M:%S') $1" | tee -a "$LOG_FILE"
+}
+
+log "========================================"
+log "Orchestrator started. Max cycles: ${MAX_CYCLES}"
+log "========================================"
 
 while [ "$CYCLE" -lt "$MAX_CYCLES" ]; do
   CYCLE=$((CYCLE + 1))
-  echo "" | tee -a "$LOG_FILE"
-  echo "--- Cycle ${CYCLE}/${MAX_CYCLES} at $(date '+%H:%M:%S') ---" | tee -a "$LOG_FILE"
+  log ""
+  log "--- Cycle ${CYCLE}/${MAX_CYCLES} ---"
 
   # Clean trigger file
   rm -f "$TRIGGER_FILE"
 
-  # Run worker
+  # Run worker directly (we're already in tmux)
+  log "Starting worker..."
   bash "${PROJECT_DIR}/scripts/worker.sh"
+  log "Worker exited."
 
   # Check trigger result
   if [ -f "$TRIGGER_FILE" ]; then
     RESULT=$(cat "$TRIGGER_FILE")
-    echo "Worker result: ${RESULT}" | tee -a "$LOG_FILE"
+    log "Worker result: ${RESULT}"
 
     case "$RESULT" in
       DONE)
-        echo "Cycle complete. Continuing..." | tee -a "$LOG_FILE"
+        log "Cycle complete. Starting next cycle..."
         ;;
       BLOCKED)
-        echo "Worker is BLOCKED. Pausing for 30s then retrying..." | tee -a "$LOG_FILE"
+        log "Worker BLOCKED. Waiting 30s then retrying..."
         sleep 30
         ;;
       ALL_COMPLETE)
-        echo "ALL PHASES COMPLETE!" | tee -a "$LOG_FILE"
-        echo "Finished at $(date)" | tee -a "$LOG_FILE"
+        log "ALL PHASES COMPLETE!"
+        log "Project is done. Check out/ for results."
         exit 0
         ;;
       *)
-        echo "Unknown result: ${RESULT}. Continuing..." | tee -a "$LOG_FILE"
+        log "Unknown result: ${RESULT}. Continuing..."
         ;;
     esac
   else
-    echo "No trigger file found. Worker may have crashed. Retrying in 10s..." | tee -a "$LOG_FILE"
+    log "No trigger file. Worker may have hit an issue. Retrying in 10s..."
     sleep 10
   fi
 
   # Brief pause between cycles
-  sleep 5
+  sleep 3
 done
 
-echo "Max cycles (${MAX_CYCLES}) reached. Stopping." | tee -a "$LOG_FILE"
-echo "Check llm.working.status for current progress." | tee -a "$LOG_FILE"
+log "Max cycles (${MAX_CYCLES}) reached."
+log "Check llm.working.status for current progress."
