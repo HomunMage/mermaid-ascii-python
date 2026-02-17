@@ -7,7 +7,7 @@ Parses Mermaid flowchart/graph DSL into the AST types from ast.py.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from mermaid_ascii.ast import (
     Direction,
@@ -19,37 +19,37 @@ from mermaid_ascii.ast import (
     Subgraph,
 )
 
-
 # ─── Tokenizer ───────────────────────────────────────────────────────────────
 
 # Token patterns (order matters for alternation)
-_COMMENT_RE = re.compile(r'%%[^\n]*')
-_WHITESPACE_RE = re.compile(r'[ \t]+')
-_NEWLINE_RE = re.compile(r'\r\n|\n|\r')
+_COMMENT_RE = re.compile(r"%%[^\n]*")
+_WHITESPACE_RE = re.compile(r"[ \t]+")
+_NEWLINE_RE = re.compile(r"\r\n|\n|\r")
 
 # Edge connectors — longer/more specific first
 _EDGE_PATTERNS: list[tuple[str, EdgeType]] = [
-    ('<-.->', EdgeType.BidirDotted),
-    ('<==>', EdgeType.BidirThick),
-    ('<-->', EdgeType.BidirArrow),
-    ('-.->',  EdgeType.DottedArrow),
-    ('==>',   EdgeType.ThickArrow),
-    ('-->',   EdgeType.Arrow),
-    ('-.-',   EdgeType.DottedLine),
-    ('===',   EdgeType.ThickLine),
-    ('---',   EdgeType.Line),
+    ("<-.->", EdgeType.BidirDotted),
+    ("<==>", EdgeType.BidirThick),
+    ("<-->", EdgeType.BidirArrow),
+    ("-.->", EdgeType.DottedArrow),
+    ("==>", EdgeType.ThickArrow),
+    ("-->", EdgeType.Arrow),
+    ("-.-", EdgeType.DottedLine),
+    ("===", EdgeType.ThickLine),
+    ("---", EdgeType.Line),
 ]
 
-_NODE_ID_RE = re.compile(r'[a-zA-Z_][a-zA-Z0-9_-]*')
-_DIRECTION_RE = re.compile(r'TD|TB|LR|RL|BT')
-_BARE_LABEL_RE = re.compile(r'[^\]\)\}\n]+')
-_LABEL_TEXT_RE = re.compile(r'[^|\n]+')
-_BARE_SUBGRAPH_LABEL_RE = re.compile(r'[^\n]+')
+_NODE_ID_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_-]*")
+_DIRECTION_RE = re.compile(r"TD|TB|LR|RL|BT")
+_BARE_LABEL_RE = re.compile(r"[^\]\)\}\n]+")
+_LABEL_TEXT_RE = re.compile(r"[^|\n]+")
+_BARE_SUBGRAPH_LABEL_RE = re.compile(r"[^\n]+")
 
 
 @dataclass
 class _Parser:
     """Stateful parser cursor over the input string."""
+
     src: str
     pos: int = 0
 
@@ -131,7 +131,7 @@ class _Parser:
         """Try to parse 'graph TD' or 'flowchart LR' header. Returns None if absent."""
         saved = self.pos
         self.skip_ws_and_newlines()
-        if self.consume('flowchart') or self.consume('graph'):
+        if self.consume("flowchart") or self.consume("graph"):
             self.skip_ws()
             d = self.parse_direction_value()
             self.skip_ws()
@@ -158,21 +158,21 @@ class _Parser:
             if ch == '"':
                 self.pos += 1
                 break
-            if ch == '\\' and self.pos + 1 < len(self.src):
+            if ch == "\\" and self.pos + 1 < len(self.src):
                 nxt = self.src[self.pos + 1]
-                if nxt == 'n':
-                    buf.append('\n')
+                if nxt == "n":
+                    buf.append("\n")
                 elif nxt == '"':
                     buf.append('"')
-                elif nxt == '\\':
-                    buf.append('\\')
+                elif nxt == "\\":
+                    buf.append("\\")
                 else:
                     buf.append(nxt)
                 self.pos += 2
             else:
                 buf.append(ch)
                 self.pos += 1
-        return ''.join(buf)
+        return "".join(buf)
 
     # ── Node label (inside shape brackets) ───────────────────────────────────
 
@@ -181,31 +181,31 @@ class _Parser:
         if self.pos < len(self.src) and self.src[self.pos] == '"':
             return self.parse_quoted_string()
         label = self.match_re(_BARE_LABEL_RE)
-        return (label or '').strip()
+        return (label or "").strip()
 
     # ── Node shape ────────────────────────────────────────────────────────────
 
     def parse_node_shape(self) -> tuple[NodeShape, str] | None:
         """Try to parse shape brackets. Returns (shape, label) or None."""
-        if self.peek('(('):
+        if self.peek("(("):
             self.pos += 2
             label = self.parse_node_label()
-            self.consume('))')
+            self.consume("))")
             return (NodeShape.Circle, label)
-        if self.peek('(') and not self.src.startswith('((', self.pos):
+        if self.peek("(") and not self.src.startswith("((", self.pos):
             self.pos += 1
             label = self.parse_node_label()
-            self.consume(')')
+            self.consume(")")
             return (NodeShape.Rounded, label)
-        if self.peek('{'):
+        if self.peek("{"):
             self.pos += 1
             label = self.parse_node_label()
-            self.consume('}')
+            self.consume("}")
             return (NodeShape.Diamond, label)
-        if self.peek('['):
+        if self.peek("["):
             self.pos += 1
             label = self.parse_node_label()
-            self.consume(']')
+            self.consume("]")
             return (NodeShape.Rectangle, label)
         return None
 
@@ -236,11 +236,11 @@ class _Parser:
 
     def try_parse_edge_label(self) -> str | None:
         self.skip_ws()
-        if not self.consume('|'):
+        if not self.consume("|"):
             return None
         text = self.match_re(_LABEL_TEXT_RE)
-        self.consume('|')
-        return (text or '').strip()
+        self.consume("|")
+        return (text or "").strip()
 
     # ── Edge chain ────────────────────────────────────────────────────────────
 
@@ -299,7 +299,7 @@ class _Parser:
     def try_parse_subgraph_direction(self) -> Direction | None:
         saved = self.pos
         self.skip_ws()
-        if self.consume('direction'):
+        if self.consume("direction"):
             self.skip_ws()
             d = self.parse_direction_value()
             self.skip_ws()
@@ -315,30 +315,30 @@ class _Parser:
         if self.pos < len(self.src) and self.src[self.pos] == '"':
             return self.parse_quoted_string()
         label = self.match_re(_BARE_SUBGRAPH_LABEL_RE)
-        return (label or '').strip()
+        return (label or "").strip()
 
     # ── Check for "end" keyword ───────────────────────────────────────────────
 
     def at_end_keyword(self) -> bool:
         """Return True if we're at the 'end' keyword (not a prefix of longer id)."""
-        if not self.src.startswith('end', self.pos):
+        if not self.src.startswith("end", self.pos):
             return False
         after = self.pos + 3
         if after >= len(self.src):
             return True
         ch = self.src[after]
-        return not (ch.isalnum() or ch in ('_', '-'))
+        return not (ch.isalnum() or ch in ("_", "-"))
 
     # ── Subgraph block ────────────────────────────────────────────────────────
 
     def parse_subgraph_block(self) -> Subgraph | None:
         saved = self.pos
         self.skip_ws()
-        if not self.consume('subgraph'):
+        if not self.consume("subgraph"):
             self.pos = saved
             return None
         # Check that 'subgraph' was a full keyword (not prefix of a node id)
-        if self.pos < len(self.src) and (self.src[self.pos].isalnum() or self.src[self.pos] in ('_', '-')):
+        if self.pos < len(self.src) and (self.src[self.pos].isalnum() or self.src[self.pos] in ("_", "-")):
             self.pos = saved
             return None
         name = self.parse_subgraph_label()
@@ -357,10 +357,8 @@ class _Parser:
                 self.skip_ws()
                 self.consume_newline()
                 break
-            if not self.parse_statement_into(sg.nodes, sg.edges, sg.subgraphs):
-                # Skip blank/unknown line
-                if not self.consume_newline():
-                    self.pos += 1
+            if not self.parse_statement_into(sg.nodes, sg.edges, sg.subgraphs) and not self.consume_newline():
+                self.pos += 1
         return sg
 
     # ── Statement ─────────────────────────────────────────────────────────────
@@ -427,6 +425,7 @@ class _Parser:
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
+
 def upsert_node(nodes: list[Node], node: Node) -> None:
     """First-definition-wins: insert node only if id not already present."""
     if not any(n.id == node.id for n in nodes):
@@ -434,6 +433,7 @@ def upsert_node(nodes: list[Node], node: Node) -> None:
 
 
 # ─── Public API ──────────────────────────────────────────────────────────────
+
 
 def parse(input: str) -> Graph:
     """Parse Mermaid flowchart text and return a Graph AST.

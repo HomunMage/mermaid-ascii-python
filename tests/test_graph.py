@@ -70,9 +70,7 @@ class TestBasicConstruction:
         assert data.subgraph is None
 
     def test_edge_data_stored(self):
-        g = _make_graph(
-            edges=[Edge(from_id="A", to_id="B", edge_type=EdgeType.DottedArrow, label="goes")]
-        )
+        g = _make_graph(edges=[Edge(from_id="A", to_id="B", edge_type=EdgeType.DottedArrow, label="goes")])
         gir = GraphIR.from_ast(g)
         data: EdgeData = gir.digraph.edges["A", "B"]["data"]
         assert data.edge_type == EdgeType.DottedArrow
@@ -347,10 +345,14 @@ class TestNodeEdgeCount:
         assert gir.node_count() == 2  # A (explicit) + B (placeholder)
 
     def test_diamond_graph(self):
-        g = _make_graph(edges=[
-            _edge("A", "B"), _edge("A", "C"),
-            _edge("B", "D"), _edge("C", "D"),
-        ])
+        g = _make_graph(
+            edges=[
+                _edge("A", "B"),
+                _edge("A", "C"),
+                _edge("B", "D"),
+                _edge("C", "D"),
+            ]
+        )
         gir = GraphIR.from_ast(g)
         assert gir.node_count() == 4
         assert gir.edge_count() == 4
@@ -409,6 +411,7 @@ class TestFromParserIntegration:
 
     def _build(self, dsl: str) -> GraphIR:
         from mermaid_ascii.parser import parse
+
         return GraphIR.from_ast(parse(dsl))
 
     def test_simple_chain(self):

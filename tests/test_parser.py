@@ -1,6 +1,5 @@
 """Tests for mermaid_ascii.parser — port of all 12 Rust parser tests."""
 
-import pytest
 from mermaid_ascii.ast import Direction, EdgeType, NodeShape
 from mermaid_ascii.parser import parse
 

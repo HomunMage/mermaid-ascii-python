@@ -7,6 +7,7 @@ from mermaid_ascii.__main__ import main
 
 def test_import():
     import mermaid_ascii
+
     assert mermaid_ascii is not None
 
 

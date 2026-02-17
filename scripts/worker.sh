@@ -45,16 +45,20 @@ WORKFLOW (follow strictly):
 1. Read status files to understand current phase and progress
 2. Implement your assigned task
 3. Verify it works: uv run python -m pytest (minimum), uv run python -m mermaid_ascii if applicable
-4. Git commit with lock (to avoid conflicts with other workers):
+4. MANDATORY: Run ruff before committing:
+   uv run ruff check --fix src/ tests/
+   uv run ruff format src/ tests/
+   uv run ruff check src/ tests/  (must pass with 0 errors)
+5. Git commit with lock (to avoid conflicts with other workers):
    while ! mkdir ${GIT_LOCK} 2>/dev/null; do sleep 2; done
    git add -A && git commit -m \"phase N: description\" --no-verify
    rmdir ${GIT_LOCK}
-5. If code smells: refactor, verify again, commit again (use lock)
-6. Update llm.working.status — APPEND your update at the bottom with [W${WORKER_ID}] prefix
-7. Write DONE to: ${TRIGGER_FILE}
+6. If code smells: refactor, verify again, run ruff again, commit again (use lock)
+7. Update llm.working.status — APPEND your update at the bottom with [W${WORKER_ID}] prefix
+8. Write DONE to: ${TRIGGER_FILE}
 
 RULES:
-- You are a senior programmer. Write clean, idiomatic Python 3.11+ code with type hints.
+- You are a senior programmer. Write clean, idiomatic Python 3.12+ code with type hints.
 - Small steps only. One function, one module, one feature at a time.
 - Always verify before committing (uv run python -m pytest at minimum)
 - Use the git lock (mkdir/rmdir ${GIT_LOCK}) around ALL git add/commit operations

@@ -44,7 +44,8 @@ edge_segment    = OWS edge_connector OWS edge_label? node_ref
 edge_label      = "|" label_text "|" OWS
 label_text      = ~r"[^|\n\r]+"
 
-edge_connector  = bidir_dotted / bidir_thick / bidir_arrow / dotted_arrow / thick_arrow / arrow / dotted_line / thick_line / line
+edge_connector  = bidir_dotted / bidir_thick / bidir_arrow / dotted_arrow
+                  / thick_arrow / arrow / dotted_line / thick_line / line
 
 arrow           = "-->"
 line            = "---"
@@ -56,7 +57,8 @@ bidir_arrow     = "<-->"
 bidir_dotted    = "<-.->"
 bidir_thick     = "<==>"
 
-subgraph_block     = subgraph_keyword OWS subgraph_label NEWLINE subgraph_direction? subgraph_body OWS end_keyword OWS NEWLINE?
+subgraph_block     = subgraph_keyword OWS subgraph_label NEWLINE
+                     subgraph_direction? subgraph_body OWS end_keyword OWS NEWLINE?
 subgraph_keyword   = "subgraph"
 subgraph_direction = OWS "direction" OWS direction_value NEWLINE
 subgraph_label     = quoted_string / bare_subgraph_label

@@ -1,6 +1,5 @@
 """Tests for mermaid_ascii.ast — port of Rust ast tests."""
 
-import pytest
 from mermaid_ascii.ast import (
     Attr,
     Direction,

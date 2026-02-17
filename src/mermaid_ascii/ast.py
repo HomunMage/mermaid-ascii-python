@@ -18,30 +18,30 @@ class Direction(Enum):
     BT = auto()
 
     @classmethod
-    def default(cls) -> "Direction":
+    def default(cls) -> Direction:
         return cls.TD
 
 
 class NodeShape(Enum):
     Rectangle = auto()  # id[Label]
-    Rounded = auto()    # id(Label)
-    Diamond = auto()    # id{Label}
-    Circle = auto()     # id((Label))
+    Rounded = auto()  # id(Label)
+    Diamond = auto()  # id{Label}
+    Circle = auto()  # id((Label))
 
     @classmethod
-    def default(cls) -> "NodeShape":
+    def default(cls) -> NodeShape:
         return cls.Rectangle
 
 
 class EdgeType(Enum):
-    Arrow = auto()       # -->
-    Line = auto()        # ---
-    DottedArrow = auto() # -.->
+    Arrow = auto()  # -->
+    Line = auto()  # ---
+    DottedArrow = auto()  # -.->
     DottedLine = auto()  # -.-
     ThickArrow = auto()  # ==>
-    ThickLine = auto()   # ===
+    ThickLine = auto()  # ===
     BidirArrow = auto()  # <-->
-    BidirDotted = auto() # <-.->
+    BidirDotted = auto()  # <-.->
     BidirThick = auto()  # <==>
 
 
@@ -59,11 +59,11 @@ class Node:
     attrs: list[Attr] = field(default_factory=list)
 
     @classmethod
-    def new(cls, id: str, label: str, shape: NodeShape) -> "Node":
+    def new(cls, id: str, label: str, shape: NodeShape) -> Node:
         return cls(id=id, label=label, shape=shape)
 
     @classmethod
-    def bare(cls, id: str) -> "Node":
+    def bare(cls, id: str) -> Node:
         """Create a bare node (id = label, default Rectangle shape)."""
         return cls(id=id, label=id, shape=NodeShape.Rectangle)
 
@@ -77,7 +77,7 @@ class Edge:
     attrs: list[Attr] = field(default_factory=list)
 
     @classmethod
-    def new(cls, from_id: str, to_id: str, edge_type: EdgeType) -> "Edge":
+    def new(cls, from_id: str, to_id: str, edge_type: EdgeType) -> Edge:
         return cls(from_id=from_id, to_id=to_id, edge_type=edge_type)
 
 
@@ -86,12 +86,12 @@ class Subgraph:
     name: str
     nodes: list[Node] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
-    subgraphs: list["Subgraph"] = field(default_factory=list)
+    subgraphs: list[Subgraph] = field(default_factory=list)
     description: str | None = None
     direction: Direction | None = None
 
     @classmethod
-    def new(cls, name: str) -> "Subgraph":
+    def new(cls, name: str) -> Subgraph:
         return cls(name=name)
 
 
@@ -103,5 +103,5 @@ class Graph:
     subgraphs: list[Subgraph] = field(default_factory=list)
 
     @classmethod
-    def new(cls) -> "Graph":
+    def new(cls) -> Graph:
         return cls()

@@ -9,14 +9,14 @@ node/edge lists while preserving subgraph membership for later rendering.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import networkx as nx
 
 from mermaid_ascii import ast
 
-
 # ─── Node data stored in the DiGraph ─────────────────────────────────────────
+
 
 @dataclass
 class NodeData:
@@ -29,6 +29,7 @@ class NodeData:
 
 # ─── Edge data stored in the DiGraph ─────────────────────────────────────────
 
+
 @dataclass
 class EdgeData:
     edge_type: ast.EdgeType
@@ -37,6 +38,7 @@ class EdgeData:
 
 
 # ─── GraphIR ──────────────────────────────────────────────────────────────────
+
 
 class GraphIR:
     """The graph intermediate representation built from an AST Graph.
@@ -110,7 +112,7 @@ class GraphIR:
         """Topological order of node ids, or None if the graph has cycles."""
         try:
             order = list(nx.topological_sort(self.digraph))
-            return [self.digraph.nodes[n]['data'].id for n in order]
+            return [self.digraph.nodes[n]["data"].id for n in order]
         except nx.NetworkXUnfeasible:
             return None
 
@@ -141,6 +143,7 @@ class GraphIR:
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _add_node_if_absent(
     digraph: nx.DiGraph,

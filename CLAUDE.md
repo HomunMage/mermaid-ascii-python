@@ -28,14 +28,16 @@ This project runs with autonomous Claude agents. **Never ask the user for permis
 
 ## Development Cycle (CRITICAL — follow every time)
 
-**Small steps → Verify → Commit → Refactor → Commit**
+**Small steps → Verify → Lint → Commit → Refactor → Commit**
 
 1. **Implement the smallest possible step** — one function, one class, one module
 2. **Verify it works** — `uv run python -m pytest` minimum, `uv run python -m mermaid_ascii` if applicable
-3. **Git commit** — `git add -A && git commit -m "phase N: description" --no-verify`
-4. **Refactor** if code smells — improve names, extract functions, simplify logic
-5. **Verify again** — `uv run python -m pytest`
-6. **Git commit the refactor** — `git add -A && git commit -m "refactor: description" --no-verify`
+3. **Lint & format** — `uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/` (MANDATORY)
+4. **Git commit** — `git add -A && git commit -m "phase N: description" --no-verify`
+5. **Refactor** if code smells — improve names, extract functions, simplify logic
+6. **Verify again** — `uv run python -m pytest`
+7. **Lint & format again** — `uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/`
+8. **Git commit the refactor** — `git add -A && git commit -m "refactor: description" --no-verify`
 
 ### Error Recovery
 - If something breaks and can't be fixed in 3 attempts: `git reset --hard HEAD`
@@ -48,7 +50,7 @@ This project runs with autonomous Claude agents. **Never ask the user for permis
 - Do NOT use snapshot tests for rendered output — ASCII art needs human eyes
 
 ## Tech Stack
-- **Python 3.11+**
+- **Python 3.12+**
 - **Package manager**: `uv` with `pyproject.toml`
 - **Parser**: PEG grammar via `parsimonious` (or hand-rolled recursive descent — match Rust `pest` grammar)
 - **Graph**: `networkx` (DiGraph — equivalent to Rust `petgraph`)
@@ -102,13 +104,27 @@ graph TD           %% or: flowchart LR / graph BT / etc.
 ```
 
 ## Code Style
-- Python 3.11+ with type hints
+- Python 3.12+ with type hints
 - dataclasses for AST types (match Rust structs)
 - Keep it simple — no over-engineering, no premature abstraction
 - Prefer clear names over comments
 - Each module should have a single clear responsibility
 - Three similar lines > premature abstraction
 - Follow the Rust implementation structure as closely as possible
+
+## Linting & Formatting (CRITICAL — run every time before commit)
+
+**Always run ruff before committing.** This is mandatory for every commit.
+
+```bash
+uv run ruff check --fix src/ tests/    # lint + auto-fix
+uv run ruff format src/ tests/          # format
+uv run ruff check src/ tests/           # verify clean (must pass with 0 errors)
+```
+
+- ruff is configured in `pyproject.toml` (line-length=120, py312, rules: E, F, I, UP, B, SIM)
+- Workers MUST run ruff before every git commit
+- If ruff reports errors that can't be auto-fixed, fix them manually before committing
 
 ## Agent Team Scripts (tmux-based autonomous development)
 
