@@ -64,3 +64,19 @@
   - h_gap/v_gap locals: swap H_GAP↔V_GAP for LR/RL coordinate spacing
   - All callers updated: assign_coordinates(), full_layout_with_padding() both paths
   - Barycenter refinement threshold uses h_gap instead of H_GAP constant
+
+---
+
+[W3] 2026-02-17 — Worker 3 DONE: lib.rs verified + examples created + all directions tested
+- lib.rs verified: render_dsl and render_dsl_padded correctly pass &gir (with direction) to layout and render
+- No changes needed to lib.rs — pipeline was already correctly wired
+- Created examples/lr_simple.txt, lr_fanout.txt, bt_simple.txt (Worker 2 had already committed them)
+- bash examples/gen.sh: all 16 examples generated correctly (including 3 new direction examples)
+- cargo test: all 25 tests pass, no regressions
+- Visual verification:
+  - LR: [Start]→[Middle]→[End] renders horizontally with ► arrows ✓
+  - LR fanout: [A]→[B,C,D] nodes stack vertically with right-pointing arrows ✓
+  - BT: [A]→[B]→[C] renders bottom-to-top with ▲ arrows ✓
+  - RL: manually tested [A]→[B]→[C] renders with ◄ arrows ✓
+  - TD: simple.out.txt still renders top-to-bottom with ▼ arrows ✓
+- ALL PHASES COMPLETE — all checkboxes in llm.plan.status marked [x]
