@@ -19,7 +19,6 @@ _git.lock
 _ref/
 *.out.txt
 .uv/
-uv.lock
 
 llm*status
 
