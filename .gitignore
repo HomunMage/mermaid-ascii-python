@@ -20,3 +20,7 @@ _ref/
 *.out.txt
 .uv/
 uv.lock
+
+llm*status
+
+out/

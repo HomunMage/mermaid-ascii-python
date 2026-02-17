@@ -1,25 +1,18 @@
 # mermaid-ascii-py — Working Status
 
-## Current Phase: Phase 0 (Project Scaffold)
-## Status: NOT STARTED
+## Current Phase: Phase 1 (AST) + Phase 2 (Parser) ready for parallel work
+## Status: Phase 0 COMPLETE, launching agent team
 
 ## What's Done
-- CLAUDE.md written with full project instructions
-- scripts/ directory created with agent team scripts (start, orchestrator, worker, checkpoint, rollback, stop)
-- llm.plan.status written with full 11-phase plan
-- llm.working.status created (this file)
+- Phase 0 COMPLETE: pyproject.toml, src/mermaid_ascii/, tests/, examples/, Dockerfile, .gitignore, scripts/
+- uv sync works, pytest passes (2 smoke tests), CLI --help works
+- Committed: c835947
 
 ## What's Next
-- Phase 0: Create pyproject.toml, directory structure, Dockerfile, .gitignore, examples, gen.sh
-- Then Phase 1: AST dataclasses
-- Then Phase 2: Grammar + Parser (the big one)
-- Then Phases 3-8: Graph IR, Layout, Render
-- Then Phase 9-10: Integration, examples, CI
+- Phase 1: AST dataclasses (src/mermaid_ascii/ast.py + tests/test_ast.py)
+- Phase 2: Grammar + Parser (src/mermaid_ascii/grammar.py + src/mermaid_ascii/parser.py + tests/test_parser.py)
+- These can be done in parallel: ast.py has no deps, grammar.py has no deps
+- Parser depends on both ast.py and grammar.py
 
 ## Blockers
 None.
-
-## Notes
-- Reference Rust code is at ../mermaid-ascii-rust/src/
-- All .mm.md example files need to be copied from ../mermaid-ascii-rust/examples/
-- parsimonious PEG grammar will need careful translation from pest syntax
