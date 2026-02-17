@@ -1,2 +1,2 @@
-direction: LR
-[Start] --> [Middle] --> [End]
+flowchart LR
+    Start --> Middle --> End

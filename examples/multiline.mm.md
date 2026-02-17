@@ -1,1 +1,2 @@
-["Web Server\n(nginx)"] --> ["App Server\n(gunicorn)"] --> ["Database\n(PostgreSQL)"]
+graph TD
+    A["Web Server\nnginx"] --> B["App Server\ngunicorn"] --> C["Database\nPostgreSQL"]

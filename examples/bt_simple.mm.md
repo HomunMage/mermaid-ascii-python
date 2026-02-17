@@ -1,2 +1,2 @@
-direction: BT
-[A] --> [B] --> [C]
+graph BT
+    A --> B --> C

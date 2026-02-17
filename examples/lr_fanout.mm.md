@@ -1,4 +1,4 @@
-direction: LR
-[A] --> [B]
-[A] --> [C]
-[A] --> [D]
+flowchart LR
+    A --> B
+    A --> C
+    A --> D
