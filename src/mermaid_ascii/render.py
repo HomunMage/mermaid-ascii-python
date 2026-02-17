@@ -422,7 +422,7 @@ def paint_subgraph_borders(gir: GraphIR, layout_nodes: list[LayoutNode], canvas:
 
     bc = BoxChars.for_charset(canvas.charset)
 
-    for sg_name, members in gir.subgraph_members.items():
+    for sg_name, members in gir.subgraph_members:
         if not members:
             continue
 

@@ -4,6 +4,20 @@ import sys
 
 import click
 
+from mermaid_ascii.ast import Direction
+from mermaid_ascii.graph import GraphIR
+from mermaid_ascii.layout import full_layout_with_padding
+from mermaid_ascii.parser import parse
+from mermaid_ascii.render import render
+
+_DIRECTION_MAP: dict[str, Direction] = {
+    "LR": Direction.LR,
+    "RL": Direction.RL,
+    "TD": Direction.TD,
+    "TB": Direction.TD,
+    "BT": Direction.BT,
+}
+
 
 @click.command()
 @click.argument("input", required=False, type=click.Path(exists=True))
@@ -40,14 +54,61 @@ import click
 )
 def main(input: str | None, use_ascii: bool, direction: str | None, padding: int, output: str | None) -> None:
     """Mermaid flowchart to ASCII/Unicode graph output."""
+    # Read input from file or stdin.
     if input:
-        with open(input) as f:
-            _text = f.read()
+        try:
+            with open(input) as f:
+                text = f.read()
+        except OSError as e:
+            click.echo(f"error: cannot read '{input}': {e}", err=True)
+            sys.exit(1)
     else:
-        _text = sys.stdin.read()
+        text = sys.stdin.read()
 
-    click.echo("not implemented", err=True)
-    sys.exit(1)
+    # Parse.
+    try:
+        ast_graph = parse(text)
+    except ValueError as e:
+        click.echo(f"parse error:\n{e}", err=True)
+        sys.exit(1)
+
+    # Direction override.
+    if direction is not None:
+        key = direction.upper()
+        if key not in _DIRECTION_MAP:
+            click.echo(f"error: unknown direction '{direction}'; use LR, RL, TD, or BT", err=True)
+            sys.exit(1)
+        ast_graph.direction = _DIRECTION_MAP[key]
+
+    # Build graph IR.
+    gir = GraphIR.from_ast(ast_graph)
+
+    # Empty graph — output nothing gracefully.
+    if gir.node_count() == 0 and not gir.subgraph_members:
+        if output:
+            try:
+                with open(output, "w") as f:
+                    f.write("")
+            except OSError as e:
+                click.echo(f"error: cannot write '{output}': {e}", err=True)
+                sys.exit(1)
+        return
+
+    # Layout + render.
+    layout_nodes, routed_edges = full_layout_with_padding(gir, padding)
+    use_unicode = not use_ascii
+    rendered = render(gir, layout_nodes, routed_edges, use_unicode)
+
+    # Write output.
+    if output:
+        try:
+            with open(output, "w") as f:
+                f.write(rendered)
+        except OSError as e:
+            click.echo(f"error: cannot write '{output}': {e}", err=True)
+            sys.exit(1)
+    else:
+        click.echo(rendered, nl=False)
 
 
 if __name__ == "__main__":
