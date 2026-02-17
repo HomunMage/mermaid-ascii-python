@@ -1,0 +1,62 @@
+# Plan: Direction Support (LR, TD, BT, RL)
+
+## Research Summary (from mermaid-ascii + beautiful-mermaid)
+
+Both reference repos use the SAME Sugiyama layout for all directions. Key patterns:
+1. LR: swap node width↔height BEFORE layout, then transpose positions (x↔y) + swap back AFTER layout
+2. BT: render as TD, then vertically flip the output canvas with character remapping
+3. RL: render as LR, then horizontally flip the output canvas with character remapping
+
+### Why swap dimensions for LR?
+In TD mode, Sugiyama puts layers as rows (y) and positions within layers as columns (x).
+Edge exits are bottom-center: (x + width/2, y + height - 1)
+Edge entries are top-center: (x + width/2, y)
+
+For LR, we want layers as columns and positions as rows:
+- Swap width↔height BEFORE layout → layout thinks nodes are tall-narrow
+- Edge exit becomes (x + narrow_w/2, y + tall_h - 1) in layout coords
+- After transposing (x↔y) back: exit = (old_y + tall_h - 1, old_x + narrow_w/2) = right-center ✓
+- Entry becomes left-center ✓
+
+This avoids modifying the Sugiyama algorithm at all.
+
+## Phases
+
+### Phase 1: LR direction support (src/layout.rs + src/render.rs)
+Worker 1 does layout.rs, Worker 2 does render.rs.
+
+**Worker 1 — layout.rs changes:**
+- [x] Add `direction` parameter to `full_layout_with_padding` (pass from `gir.direction`)
+- [x] When direction is LR or RL: swap width↔height in `node_dims` closure
+- [x] When direction is LR or RL: swap H_GAP↔V_GAP in coordinate assignment
+- [x] Everything else stays the same (Sugiyama, edge routing all unchanged)
+
+**Worker 2 — render.rs changes:**
+- [x] Add `transpose_layout` function: swap x↔y in LayoutNode positions and RoutedEdge waypoints, swap width↔height back to original
+- [x] Add `flip_vertical` function for BT: reverse lines + remap chars (▼↔▲, ┌↔└, ┐↔┘, ┬↔┴)
+- [x] Add `flip_horizontal` function for RL: reverse each line + remap chars (►↔◄, ┌↔┐, └↔┘, ├↔┤)
+- [x] Modify `render()` to: transpose if LR/RL, render, then flip if BT/RL
+
+### Phase 2: Wire direction through pipeline (src/lib.rs + src/main.rs)
+- [x] `render_dsl` / `render_dsl_padded` already pass `gir` with direction — just ensure layout receives it
+- [x] `main.rs` already has --direction flag — no changes needed
+- [x] Test with: `echo -e "direction: LR\n[A] --> [B] --> [C]" | text-graph`
+
+### Phase 3: Add LR/BT examples and verify
+- [x] examples/lr_simple.txt — `direction: LR\n[Start] --> [Middle] --> [End]`
+- [x] examples/lr_fanout.txt — `direction: LR\n[A] --> [B]\n[A] --> [C]\n[A] --> [D]`
+- [x] examples/bt_simple.txt — `direction: BT\n[A] --> [B] --> [C]`
+- [x] `bash examples/gen.sh` — all examples generate correctly
+- [x] `cargo test` — all tests pass
+
+## Key Design Decision
+The node box itself is ALWAYS drawn as a horizontal rectangle with text reading left-to-right.
+Only the POSITION is transposed. Edge routing works automatically because exit/entry points are computed from (transposed) node dimensions.
+
+## Verification
+- [x] `cargo test` — all 25 tests pass
+- [x] LR chain: `[Start] --> [Middle] --> [End]` renders horizontally with ► arrows
+- [x] LR fan-out: nodes stack vertically, arrows go right
+- [x] BT chain: arrows point ▲ upward
+- [x] RL chain: arrows point ◄ leftward
+- [x] TD regression: all existing examples still render correctly

@@ -1,0 +1,66 @@
+# Working Status
+
+## Current Phase: Direction Support (LR, TD, BT, RL) — Phase 1
+
+## Context
+- TD layout is fully working with Sugiyama algorithm
+- Direction enum (LR, RL, TD, BT) is parsed and stored in `gir.direction`
+- The `--direction` CLI flag already works
+- BUT: all directions currently render as TD (no transposition)
+
+## Approach
+1. Swap node dimensions (width↔height) in layout.rs for LR/RL BEFORE Sugiyama runs
+2. Transpose layout coordinates (x↔y) in render.rs AFTER layout
+3. Flip canvas for BT (vertical) and RL (horizontal) with char remapping
+
+## Worker Task Assignments (Phase 1)
+
+**Worker 1: src/layout.rs**
+- Modify `full_layout_with_padding` to accept and use direction
+- When LR/RL: swap width↔height in node_dims computation
+- When LR/RL: swap H_GAP↔V_GAP constants for coordinate spacing
+- Leave all Sugiyama internals unchanged
+
+**Worker 2: src/render.rs**
+- Add `transpose_layout()`: swap x↔y positions, swap width↔height back
+- Add `flip_vertical()`: reverse rows + remap chars for BT
+- Add `flip_horizontal()`: reverse columns + remap chars for RL
+- Modify `render()` to apply transforms based on `gir.direction`
+
+**Worker 3: src/lib.rs + examples**
+- Ensure `render_dsl` passes direction through layout → render
+- Create examples/lr_simple.txt, lr_fanout.txt, bt_simple.txt
+- Run `bash examples/gen.sh` and verify outputs
+- Run `cargo test` to ensure no regressions
+
+## Next Steps
+- Launch agent team with `bash scripts/start.sh`
+- Workers implement Phase 1 in parallel
+- After Phase 1 done, verify LR/BT/RL outputs visually
+
+---
+
+[W2] 2026-02-17 — Worker 2 DONE: render.rs direction transforms implemented
+- Added `transpose_layout(nodes, edges)`: swaps x↔y and width↔height for LR/RL
+- Added `flip_vertical(s)`: reverses row order + remaps ▼↔▲, ┌↔└, ┐↔┘, ┬↔┴, ╭↔╰, ╮↔╯
+- Added `flip_horizontal(s)`: reverses col order + remaps ►↔◄, ┌↔┐, └↔┘, ├↔┤, ╭↔╮, ╰↔╯
+- Modified `render()` to apply transforms based on `gir.direction`:
+  - TD: no transform (native Sugiyama output)
+  - LR: transpose_layout before painting (layout ran with swapped dims)
+  - BT: flip_vertical after painting
+  - RL: transpose_layout before painting + flip_horizontal after painting
+- All 25 tests pass; clean cargo check (no warnings)
+- Committed: phase 1: add transpose_layout, flip_vertical, flip_horizontal in render.rs
+
+---
+
+[W1] 2026-02-17 — Worker 1 DONE: layout.rs direction support verified complete
+- Task: pass direction to assign_coordinates_padded, swap width↔height and H_GAP↔V_GAP for LR/RL
+- Worker 2 had already committed identical layout.rs changes as part of their render.rs commit
+- Verified: cargo check clean, all 25 tests pass
+- Changes confirmed in commit 04ca68e:
+  - assign_coordinates_padded now accepts &ast::Direction parameter
+  - is_lr_or_rl flag: when LR/RL, swap width↔height in node_dims closure
+  - h_gap/v_gap locals: swap H_GAP↔V_GAP for LR/RL coordinate spacing
+  - All callers updated: assign_coordinates(), full_layout_with_padding() both paths
+  - Barycenter refinement threshold uses h_gap instead of H_GAP constant
