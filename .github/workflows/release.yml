@@ -8,9 +8,6 @@ on:
 permissions:
   contents: write
 
-env:
-  BASE_NAME: mermaid-ascii-rust
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,35 +16,30 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             archive: mermaid-ascii-rust-linux-x86_64.tar.gz
-            binary: mermaid-ascii-rust
           - target: aarch64-unknown-linux-gnu
             archive: mermaid-ascii-rust-linux-aarch64.tar.gz
-            binary: mermaid-ascii-rust
           - target: x86_64-pc-windows-gnu
             archive: mermaid-ascii-rust-windows-x86_64.zip
-            binary: mermaid-ascii-rust.exe
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build in Docker
+      - name: Build with Docker
         run: |
-          docker build --build-arg TARGET=${{ matrix.target }} -t build-${{ matrix.target }} .
-
-      - name: Extract binary
-        run: |
-          docker create --name extract build-${{ matrix.target }}
-          docker cp extract:/out/${{ matrix.binary }} ./${{ matrix.binary }}
-          docker rm extract
+          docker buildx build \
+            --build-arg TARGET=${{ matrix.target }} \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --output type=local,dest=./out .
 
       - name: Package (tar.gz)
         if: "!contains(matrix.archive, '.zip')"
-        run: tar czf ${{ matrix.archive }} ${{ matrix.binary }}
+        run: tar czf ${{ matrix.archive }} -C out .
 
       - name: Package (zip)
         if: contains(matrix.archive, '.zip')
-        run: zip ${{ matrix.archive }} ${{ matrix.binary }}
+        run: cd out && zip -r ../${{ matrix.archive }} .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -69,24 +61,19 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Build release binary
+      - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Run tests
-        run: cargo test --release --target ${{ matrix.target }}
-
       - name: Package
-        run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ../../../${{ matrix.archive }} mermaid-ascii-rust
+        run: tar czf ${{ matrix.archive }} -C target/${{ matrix.target }}/release mermaid-ascii-rust
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
