@@ -2,6 +2,7 @@ mod ast;
 mod graph;
 mod layout;
 mod parser;
+mod render;
 
 use std::env;
 use std::fs;
