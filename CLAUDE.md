@@ -1,7 +1,8 @@
 # CLAUDE.md — text-graph project instructions
 
 ## Project Overview
-Rust rewrite of graph-easy: DSL text input → Parse → Graph layout → ASCII/Unicode text output.
+Mermaid flowchart syntax → Parse → Graph layout → ASCII/Unicode text output (Rust).
+Design aligned with mermaid-ascii (Go) and beautiful-mermaid (TS) for easy porting of their updates.
 
 ## Autonomous Mode
 This project runs with autonomous Claude agents. **Never ask the user for permission or clarification. Just work.**
@@ -46,7 +47,7 @@ This project runs with autonomous Claude agents. **Never ask the user for permis
 ## Key Files
 - `src/` — Rust source code
   - `ast.rs` — AST types (Direction, Node, Edge, Subgraph, etc.)
-  - `grammar.pest` — PEG grammar for the DSL
+  - `grammar.pest` — PEG grammar for Mermaid flowchart syntax
   - `parser.rs` — pest parser → AST
   - `graph.rs` — AST → petgraph IR (GraphIR)
   - `layout.rs` — Sugiyama layout (cycle removal, layers, crossing min, coordinates, edge routing)
@@ -77,7 +78,25 @@ This project runs with autonomous Claude agents. **Never ask the user for permis
 
 ## Pipeline
 ```
-DSL text → pest parser → AST → GraphIR (petgraph) → Sugiyama layout → edge routing → canvas render → text output
+Mermaid text → pest parser → AST → GraphIR (petgraph) → Sugiyama layout → edge routing → canvas render → text output
+```
+
+## Mermaid Syntax Supported
+```mermaid
+graph TD           %% or: flowchart LR / graph BT / etc.
+    A[Rectangle]   %% id + shape bracket = node definition
+    B(Rounded)
+    C{Diamond}
+    D((Circle))
+    A --> B        %% solid arrow
+    B --- C        %% solid line (no arrow)
+    C -.-> D       %% dotted arrow
+    D ==> A        %% thick arrow
+    A <--> B       %% bidirectional
+    A -->|label| B %% edge with label
+    subgraph Group
+        X --> Y
+    end
 ```
 
 ## Current Feature Status
@@ -86,7 +105,7 @@ DSL text → pest parser → AST → GraphIR (petgraph) → Sugiyama layout → 
 - [ ] RL, BT — parsed but NOT rendered
 - [x] Subgraphs with compound node layout
 - [x] Edge labels
-- [x] Multiple edge types (arrow, back-arrow, bidirectional, line, thick, dotted)
+- [x] Multiple edge types (arrow, line, dotted, thick, bidirectional variants)
 - [x] Node shapes (rectangle, rounded, diamond, circle)
 - [x] Multi-line labels
 - [x] ASCII/Unicode character sets
