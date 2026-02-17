@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# Python artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test artifacts
+.pytest_cache/
+.ruff_cache/
+tests/
+htmlcov/
+.coverage
+
+# Project-specific
+_ref/
+_git.lock
+_trigger_*
+_task_queue
+out/
+llm.*.status
+CLAUDE.md
+scripts/
+examples/
+
+# Documentation
+*.md
