@@ -150,8 +150,8 @@ Layer count: 2
   Layer 1: Idle
 
 Reversed back-edges:
-  Idle ← Idle (displayed reversed)
   Idle ← Active (displayed reversed)
+  Idle ← Idle (displayed reversed)
 
 ================================================================================
 EXAMPLE 14: Mixed node shapes in one graph
@@ -169,13 +169,14 @@ EXAMPLE 15: Long labels and multi-word node names
 ================================================================================
 
 Reversed edges (cycle removal): 1
-Layer count: 2
+Layer count: 3
 
-  Layer 0: User Authentication Service
-  Layer 1: Audit Log, Session Token Store
+  Layer 0: Session Token Store
+  Layer 1: User Authentication Service
+  Layer 2: Audit Log
 
 Reversed back-edges:
-  Session Token Store ← User Authentication Service (displayed reversed)
+  User Authentication Service ← Session Token Store (displayed reversed)
 
 ================================================================================
 EXAMPLE 16: Dense diamond (cross-edge) graph
