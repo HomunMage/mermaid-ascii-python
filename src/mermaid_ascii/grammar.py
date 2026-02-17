@@ -35,9 +35,9 @@ circle_shape    = "((" node_label "))"
 node_label      = quoted_string / unquoted_label
 unquoted_label  = ~r"(?:[^\]\)\}\n\r])+"
 
-node_stmt       = node_ref OWS NEWLINE
+node_stmt       = node_ref OWS NEWLINE?
 
-edge_stmt       = node_ref edge_chain OWS NEWLINE
+edge_stmt       = node_ref edge_chain OWS NEWLINE?
 edge_chain      = edge_segment+
 edge_segment    = OWS edge_connector OWS edge_label? node_ref
 
