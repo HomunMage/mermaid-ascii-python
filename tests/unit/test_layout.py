@@ -38,6 +38,7 @@ from mermaid_ascii.layout.engine import (
     full_layout,
     full_layout_with_padding,
 )
+from mermaid_ascii.layout.graph import EdgeData, GraphIR, NodeData
 from mermaid_ascii.layout.sugiyama import (
     COMPOUND_PREFIX,
     H_GAP,
@@ -62,7 +63,6 @@ from mermaid_ascii.layout.sugiyama import (
 )
 from mermaid_ascii.layout.types import DUMMY_PREFIX, LayoutNode, Point, RoutedEdge
 from mermaid_ascii.syntax import types as mast
-from mermaid_ascii.syntax.graph import EdgeData, GraphIR, NodeData
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -5,9 +5,9 @@ import sys
 import click
 
 from mermaid_ascii.layout.engine import full_layout_with_padding
+from mermaid_ascii.layout.graph import GraphIR
 from mermaid_ascii.parsers.registry import parse
 from mermaid_ascii.renderers.ascii import AsciiRenderer
-from mermaid_ascii.syntax.graph import GraphIR
 from mermaid_ascii.types import Direction
 
 _DIRECTION_MAP: dict[str, Direction] = {
@@ -62,9 +62,9 @@ def main(input: str | None, use_ascii: bool, direction: str | None, padding: int
                 sys.exit(1)
         return
 
-    layout_nodes, routed_edges = full_layout_with_padding(gir, padding)
+    layout_result = full_layout_with_padding(gir, padding)
     renderer = AsciiRenderer(unicode=not use_ascii)
-    rendered = renderer.render(gir, layout_nodes, routed_edges)
+    rendered = renderer.render(layout_result)
 
     if output:
         try:

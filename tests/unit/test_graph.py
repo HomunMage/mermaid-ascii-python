@@ -1,6 +1,6 @@
 """Tests for mermaid_ascii.graph — GraphIR construction, cycle detection, and degree queries."""
 
-from mermaid_ascii.syntax.graph import EdgeData, GraphIR, NodeData
+from mermaid_ascii.layout.graph import EdgeData, GraphIR, NodeData
 from mermaid_ascii.syntax.types import (
     Edge,
     Graph,
