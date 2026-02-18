@@ -67,7 +67,7 @@ spawn_worker() {
 
 # Wait for all workers to complete (poll trigger files)
 wait_for_workers() {
-  local TIMEOUT=1800  # 30 min max per cycle
+  local TIMEOUT=900  # 15 min max per cycle
   local ELAPSED=0
   local ALL_DONE=false
 

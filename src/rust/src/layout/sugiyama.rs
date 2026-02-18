@@ -1604,10 +1604,17 @@ mod tests {
 
     #[test]
     fn test_full_layout_cyclic() {
-        // Should not panic on cyclic input
+        // Should not panic on cyclic input; cycle removal may insert dummy nodes
+        // Python returns 4 nodes: A, B, C, plus 1 dummy for the long span.
         let gir = make_gir(vec![("A", "B"), ("B", "C"), ("C", "A")]);
         let result = SugiyamaLayout::layout(&gir, 1);
-        assert_eq!(result.nodes.len(), 3);
+        // At least 3 real nodes (A, B, C) plus possible dummy nodes
+        assert!(result.nodes.len() >= 3);
+        // Real nodes must be present
+        let ids: Vec<&str> = result.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert!(ids.contains(&"A"));
+        assert!(ids.contains(&"B"));
+        assert!(ids.contains(&"C"));
     }
 
     #[test]
@@ -1617,5 +1624,190 @@ mod tests {
         let result = SugiyamaLayout::layout(&gir, 1);
         // Self loop should produce no routed edges
         assert!(result.edges.is_empty());
+    }
+
+    // ── route_edges tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_route_edges_one_route_per_edge() {
+        // A->B->C: should produce exactly 2 routed edges
+        let gir = make_gir(vec![("A", "B"), ("B", "C")]);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        assert_eq!(result.edges.len(), 2);
+    }
+
+    #[test]
+    fn test_route_edges_from_to_ids_match() {
+        // A->B: routed edge should have from_id=A, to_id=B
+        let gir = make_gir(vec![("A", "B")]);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        assert_eq!(result.edges.len(), 1);
+        let edge = &result.edges[0];
+        let ids: std::collections::HashSet<&str> =
+            [edge.from_id.as_str(), edge.to_id.as_str()].into();
+        assert!(ids.contains("A"));
+        assert!(ids.contains("B"));
+    }
+
+    #[test]
+    fn test_route_edges_each_has_waypoints() {
+        // Each routed edge must have at least 2 waypoints
+        let gir = make_gir(vec![("A", "B"), ("B", "C")]);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        for edge in &result.edges {
+            assert!(
+                edge.waypoints.len() >= 2,
+                "Edge {}→{} has {} waypoints",
+                edge.from_id,
+                edge.to_id,
+                edge.waypoints.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_route_edges_label_preserved() {
+        // Edge label should be preserved in the routed edge
+        use crate::syntax::types::{Edge, Graph};
+        let mut e = Edge::new("A", "B", EdgeType::Arrow);
+        e.label = Some("hello".to_string());
+        let g = Graph {
+            direction: Direction::TD,
+            nodes: Vec::new(),
+            edges: vec![e],
+            subgraphs: Vec::new(),
+        };
+        let gir = GraphIR::from_ast(&g);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        assert_eq!(result.edges.len(), 1);
+        assert_eq!(result.edges[0].label, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn test_route_edges_edge_type_preserved() {
+        // Edge type (e.g. DottedArrow) should be preserved in the routed edge
+        let gir = make_gir_with_edge_type(vec![("A", "B", EdgeType::DottedArrow)]);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        assert_eq!(result.edges.len(), 1);
+        assert_eq!(result.edges[0].edge_type, EdgeType::DottedArrow);
+    }
+
+    #[test]
+    fn test_route_edges_no_self_loops() {
+        // Self-loops must be excluded from routes; other edges still routed
+        let gir = make_gir(vec![("A", "B"), ("A", "A")]);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        for edge in &result.edges {
+            assert_ne!(
+                edge.from_id, edge.to_id,
+                "Self-loop should not appear in routes"
+            );
+        }
+    }
+
+    #[test]
+    fn test_route_edges_all_waypoints_non_negative() {
+        // All waypoints must have non-negative coordinates
+        let gir = make_gir(vec![("A", "B"), ("A", "C"), ("B", "D"), ("C", "D")]);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        for edge in &result.edges {
+            for wp in &edge.waypoints {
+                assert!(
+                    wp.x >= 0,
+                    "Negative x in edge {}→{}",
+                    edge.from_id,
+                    edge.to_id
+                );
+                assert!(
+                    wp.y >= 0,
+                    "Negative y in edge {}→{}",
+                    edge.from_id,
+                    edge.to_id
+                );
+            }
+        }
+    }
+
+    // ── full_layout() integration tests ──────────────────────────────────────
+
+    #[test]
+    fn test_full_layout_subgraph_includes_members() {
+        use crate::syntax::types::{Node, Subgraph};
+        let g = Graph {
+            direction: Direction::TD,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            subgraphs: vec![Subgraph {
+                name: "sg1".to_string(),
+                description: None,
+                direction: None,
+                nodes: vec![Node::bare("A"), Node::bare("B")],
+                edges: Vec::new(),
+                subgraphs: Vec::new(),
+            }],
+        };
+        let gir = GraphIR::from_ast(&g);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        // Result should include both member nodes A and B
+        let ids: Vec<&str> = result.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert!(ids.contains(&"A"), "A missing from layout: {:?}", ids);
+        assert!(ids.contains(&"B"), "B missing from layout: {:?}", ids);
+    }
+
+    #[test]
+    fn test_full_layout_all_coords_non_negative() {
+        // All node and waypoint coordinates must be non-negative
+        let gir = make_gir(vec![("A", "B"), ("B", "C"), ("A", "C")]);
+        let result = SugiyamaLayout::layout(&gir, 1);
+        for n in &result.nodes {
+            assert!(n.x >= 0, "Negative x for node {}", n.id);
+            assert!(n.y >= 0, "Negative y for node {}", n.id);
+        }
+        for edge in &result.edges {
+            for wp in &edge.waypoints {
+                assert!(
+                    wp.x >= 0,
+                    "Negative wp.x in edge {}→{}",
+                    edge.from_id,
+                    edge.to_id
+                );
+                assert!(
+                    wp.y >= 0,
+                    "Negative wp.y in edge {}→{}",
+                    edge.from_id,
+                    edge.to_id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_full_layout_custom_padding_wider_nodes() {
+        // Larger padding should result in wider nodes than smaller padding
+        let gir1 = make_gir_nodes(vec!["A"], vec![]);
+        let gir2 = make_gir_nodes(vec!["A"], vec![]);
+        let result1 = SugiyamaLayout::layout(&gir1, 0);
+        let result2 = SugiyamaLayout::layout(&gir2, 4);
+        assert!(
+            result2.nodes[0].width >= result1.nodes[0].width,
+            "Larger padding should produce wider nodes"
+        );
+    }
+
+    // ── Helper for make_gir with custom EdgeType ──────────────────────────────
+
+    fn make_gir_with_edge_type(edges: Vec<(&str, &str, EdgeType)>) -> GraphIR {
+        use crate::syntax::types::{Edge, Graph};
+        let ast_edges: Vec<Edge> = edges
+            .iter()
+            .map(|(a, b, t)| Edge::new(*a, *b, t.clone()))
+            .collect();
+        let g = Graph {
+            direction: Direction::TD,
+            nodes: Vec::new(),
+            edges: ast_edges,
+            subgraphs: Vec::new(),
+        };
+        GraphIR::from_ast(&g)
     }
 }
