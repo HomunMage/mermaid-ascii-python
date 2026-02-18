@@ -1,11 +1,14 @@
-# CLAUDE.md — mermaid-ascii-py project instructions
+# CLAUDE.md — mermaid-ascii project instructions
 
 ## Project Overview
-Mermaid flowchart syntax → Parse → Graph layout → ASCII/Unicode text output (Python).
-This is a 1:1 port of mermaid-ascii-rust. Design aligned with mermaid-ascii (Go) and beautiful-mermaid (TS) for easy porting of their updates.
+Mermaid flowchart syntax → Parse → Graph layout → ASCII/Unicode text output.
+**Dual-language repo**: Python (prototype) + Rust (production port) in one folder.
+Both languages have 1:1 matching module structure and produce identical output.
 
 ## Reference Implementation
-The Rust source lives at `../mermaid-ascii-rust/src/`. Every module in this Python port maps 1:1 to a Rust source file. When in doubt, read the Rust code — it is the ground truth.
+- Old Rust source at `../mermaid-ascii-rust/src/` — logic reference (monolithic layout.rs/render.rs)
+- Python code at `src/mermaid_ascii/` — the **ground truth** for architecture and module structure
+- Rust code at `src/rust/src/` — must mirror Python's module layout exactly
 
 ## Autonomous Mode
 This project runs with autonomous Claude agents. **Never ask the user for permission or clarification. Just work.**
@@ -30,13 +33,17 @@ This project runs with autonomous Claude agents. **Never ask the user for permis
 
 **Small steps → Verify → Lint → Commit → Refactor → Commit**
 
-1. **Implement the smallest possible step** — one function, one class, one module
-2. **Verify it works** — `uv run python -m pytest` minimum, `uv run python -m mermaid_ascii` if applicable
-3. **Lint & format** — `uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/` (MANDATORY)
+1. **Implement the smallest possible step** — one function, one struct, one module
+2. **Verify it works**:
+   - Python: `uv run python -m pytest`
+   - Rust: `cd src/rust && cargo test && cd ../..`
+3. **Lint & format**:
+   - Python: `uv run ruff check --fix src/mermaid_ascii/ tests/ && uv run ruff format src/mermaid_ascii/ tests/`
+   - Rust: `cd src/rust && cargo fmt && cargo clippy && cd ../..`
 4. **Git commit** — `git add -A && git commit -m "phase N: description" --no-verify`
 5. **Refactor** if code smells — improve names, extract functions, simplify logic
-6. **Verify again** — `uv run python -m pytest`
-7. **Lint & format again** — `uv run ruff check --fix src/ tests/ && uv run ruff format src/ tests/`
+6. **Verify again** (same as step 2)
+7. **Lint & format again** (same as step 3)
 8. **Git commit the refactor** — `git add -A && git commit -m "refactor: description" --no-verify`
 
 ### Error Recovery
@@ -44,45 +51,64 @@ This project runs with autonomous Claude agents. **Never ask the user for permis
 - If a whole approach is wrong: `git log --oneline -10` to find a good checkpoint, then `git reset --hard <hash>`
 
 ## Verification Approach
-- Unit tests for Python logic (`uv run python -m pytest`)
+- Python unit tests: `uv run python -m pytest`
+- Rust unit tests: `cd src/rust && cargo test`
+- Rust e2e tests (via Python): `uv run python -m pytest tests/e2e/test_rust_binary.py`
 - Visual output verified by generating examples: `bash examples/gen.sh`
 - Human reviews `.out.txt` files in `examples/` to confirm rendering correctness
 - Do NOT use snapshot tests for rendered output — ASCII art needs human eyes
 
 ## Tech Stack
-- **Python 3.12+**
-- **Package manager**: `uv` with `pyproject.toml`
-- **Parser**: PEG grammar via `parsimonious` (or hand-rolled recursive descent — match Rust `pest` grammar)
-- **Graph**: `networkx` (DiGraph — equivalent to Rust `petgraph`)
-- **CLI**: `click` (equivalent to Rust `clap`)
+
+### Python
+- **Python 3.12+**, package manager `uv` with `pyproject.toml`
+- **Parser**: hand-rolled recursive descent
+- **Graph**: `networkx` (DiGraph)
+- **CLI**: `click`
 - **Testing**: `pytest`
-- **No other runtime deps** beyond the above
+- **Lint**: `ruff`
 
-## Module Mapping (Rust → Python)
+### Rust
+- **Rust 2024 edition**, build with `cargo` (Cargo.toml at `src/rust/`)
+- **Parser**: hand-rolled recursive descent (matching Python, NO pest)
+- **Graph**: `petgraph` (DiGraph)
+- **CLI**: `clap` (derive)
+- **Testing**: `cargo test` + Python e2e tests for binary
+- **No other deps** besides petgraph + clap
 
-| Rust file       | Python module                  | Purpose                              |
-|-----------------|--------------------------------|--------------------------------------|
-| `ast.rs`        | `mermaid_ascii/ast.py`         | AST types (dataclasses)              |
-| `grammar.pest`  | `mermaid_ascii/grammar.py`     | PEG grammar string                   |
-| `parser.rs`     | `mermaid_ascii/parser.py`      | Parser → AST                         |
-| `graph.rs`      | `mermaid_ascii/graph.py`       | AST → networkx DiGraph (GraphIR)     |
-| `layout.rs`     | `mermaid_ascii/layout.py`      | Sugiyama layout algorithm            |
-| `render.rs`     | `mermaid_ascii/render.py`      | Canvas renderer                      |
-| `lib.rs`        | `mermaid_ascii/__init__.py`    | Library API (render_dsl)             |
-| `main.rs`       | `mermaid_ascii/__main__.py`    | CLI entry point (click)              |
+## Module Mapping (Python ↔ Rust)
+
+| Python (src/mermaid_ascii/)  | Rust (src/rust/src/)          | Purpose                              |
+|------------------------------|-------------------------------|--------------------------------------|
+| `syntax/types.py`            | `syntax/types.rs`             | Enums + AST structs                  |
+| `config.py`                  | `config.rs`                   | RenderConfig                         |
+| `parsers/registry.py`        | `parsers/mod.rs`              | detect_type() + parse() dispatch     |
+| `parsers/base.py`            | `parsers/base.rs`             | Parser protocol/trait                |
+| `parsers/flowchart.py`       | `parsers/flowchart.rs`        | Recursive descent parser             |
+| `layout/engine.py`           | `layout/mod.rs`               | full_layout() convenience API        |
+| `layout/graph.py`            | `layout/graph.rs`             | GraphIR (networkx/petgraph)          |
+| `layout/sugiyama.py`         | `layout/sugiyama.rs`          | Sugiyama algorithm                   |
+| `layout/types.py`            | `layout/types.rs`             | LayoutNode, RoutedEdge, Point        |
+| `renderers/base.py`          | `renderers/mod.rs`            | Renderer protocol/trait              |
+| `renderers/ascii.py`         | `renderers/ascii.rs`          | ASCII/Unicode renderer               |
+| `renderers/canvas.py`        | `renderers/canvas.rs`         | Canvas 2D char grid                  |
+| `renderers/charset.py`       | `renderers/charset.rs`        | BoxChars, Arms junction merging      |
+| `api.py`                     | `lib.rs`                      | render_dsl() public API              |
+| `__main__.py`                | `main.rs`                     | CLI entry point                      |
 
 ## Key Files
-- `pyproject.toml` — Project metadata, dependencies, build config (uv)
-- `Dockerfile` — Multi-stage build matching Rust Dockerfile pattern
-- `src/mermaid_ascii/` — Python source package
-- `tests/` — pytest test files
-- `examples/` — Example DSL files + gen script (copied from Rust)
-- `scripts/` — Orchestrator/worker agent scripts (adapted from Rust)
+- `pyproject.toml` — Python metadata, deps, build config
+- `src/rust/Cargo.toml` — Rust metadata, deps, build config
+- `src/mermaid_ascii/` — Python source
+- `src/rust/src/` — Rust source
+- `tests/` — pytest (Python unit tests + e2e tests for both Python and Rust binary)
+- `examples/` — Shared example DSL files + golden .expect files
+- `scripts/` — Orchestrator/worker agent scripts
 - `_ref/` — Cloned reference repos (gitignored)
 
-## Pipeline
+## Pipeline (both languages)
 ```
-Mermaid text → PEG parser → AST → GraphIR (networkx) → Sugiyama layout → edge routing → canvas render → text output
+Mermaid text → recursive descent parser → AST → GraphIR → Sugiyama layout → edge routing → canvas render → text output
 ```
 
 ## Mermaid Syntax Supported
