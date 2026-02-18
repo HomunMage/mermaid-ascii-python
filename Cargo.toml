@@ -7,11 +7,11 @@ authors = []
 
 [[bin]]
 name = "mermaid-ascii"
-path = "src/main.rs"
+path = "src/rust/main.rs"
 
 [lib]
 name = "mermaid_ascii"
-path = "src/lib.rs"
+path = "src/rust/lib.rs"
 
 [dependencies]
 petgraph = "0.6"

@@ -7,8 +7,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 EXAMPLES_DIR = REPO_ROOT / "examples"
-RUST_DIR = REPO_ROOT / "src" / "rust"
-BINARY_PATH = RUST_DIR / "target" / "release" / "mermaid-ascii"
+BINARY_PATH = REPO_ROOT / "target" / "release" / "mermaid-ascii"
 
 
 def find_example_pairs() -> list[tuple[str, Path, Path]]:
@@ -30,7 +29,7 @@ def rust_binary() -> Path:
     """Build the Rust binary (release mode) once per session and return its path."""
     result = subprocess.run(
         ["cargo", "build", "--release"],
-        cwd=RUST_DIR,
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
     )

@@ -28,3 +28,4 @@ _ref/
 
 # Rust build artifacts
 src/rust/target/
+target/
