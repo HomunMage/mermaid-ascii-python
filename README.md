@@ -1,6 +1,6 @@
 # Mermaid ASCII python
 
-A Python CLI that renders Mermaid flowchart syntax as ASCII/Unicode art.
+A compiler that renders Mermaid flowchart syntax as ASCII/Unicode art.
 
 ```
 echo 'graph TD
@@ -534,7 +534,7 @@ MIT
 
 
 ## Reference
-
+```
 ┌──────────────┬──────────────────────┬────────────────────┬────────────────────┬────────────────────────┐
 │              │      Ours            │ Go (mermaid-ascii) │ TS (ascii-mermaid) │           D2           │
 ├──────────────┼──────────────────────┼────────────────────┼────────────────────┼────────────────────────┤
@@ -550,3 +550,4 @@ MIT
 ├──────────────┼──────────────────────┼────────────────────┼────────────────────┼────────────────────────┤
 │ Target       │ ASCII/Unicode        │ ASCII/Unicode      │ ASCII/Unicode      │ SVG                    │
 └──────────────┴──────────────────────┴────────────────────┴────────────────────┴────────────────────────┘
+```
