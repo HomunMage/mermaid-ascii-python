@@ -203,96 +203,88 @@ bash examples/gen.sh
 Multi-phase compiler pipeline. Each phase transforms one representation to the next.
 
 ```
-                        Mermaid DSL text
-                              │
-          ┌───────────────────┼───────────────────┐
+                          Mermaid DSL text
+                                │
+                                ▼
+                    ┌───────────────────────┐
+                    │  Tokenizer + Parser   │  parsers/registry.py
+                    │  (recursive descent)  │  parsers/flowchart.py
+                    └───────────┬───────────┘
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          │                     │                     │
+          ▼                     ▼                     ▼
+   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+   │  Flowchart   │    │  Sequence    │    │   Class      │
+   │  AST         │    │  AST         │    │   AST        │
+   │  (current)   │    │  (future)    │    │   (future)   │
+   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘
           │                   │                   │
           ▼                   ▼                   ▼
-   ┌─────────────┐   ┌──────────────┐   ┌──────────────┐
-   │  Flowchart  │   │  Sequence    │   │  Class       │
-   │  Parser     │   │  Parser      │   │  Parser      │
-   │ (recursive  │   │  (future)    │   │  (future)    │
-   │  descent)   │   │              │   │              │
-   └──────┬──────┘   └──────┬───────┘   └──────┬───────┘
-          │                  │                  │
-          └───────────┬──────┴──────────────────┘
-                      │
-                      ▼
-              ┌───────────────┐
-              │      AST      │  syntax/types.py
-              │ Graph, Node,  │  Direction, NodeShape,
-              │ Edge, Subgraph│  EdgeType
-              └───────┬───────┘
-                      │  GraphIR.from_ast()
-                      ▼
-              ┌───────────────┐
-              │   Graph IR    │  syntax/graph.py
-              │  networkx     │  NodeData, EdgeData
-              │  DiGraph      │  subgraph membership
-              └───────┬───────┘
-                      │
-          ┌───────────┼───────────┐
-          │           │           │
-          ▼           ▼           ▼
-   ┌─────────────┐ ┌────────┐ ┌────────┐
-   │  Sugiyama   │ │ Grid   │ │ Force  │
-   │  Layout     │ │ Layout │ │ Layout │
-   │ (current)   │ │(future)│ │(future)│
-   └──────┬──────┘ └────────┘ └────────┘
-          │
-          │  Sugiyama Algorithm Phases:
-          │
-          │  1. collapse_subgraphs()
-          │     └─ replace subgraph members with compound node
-          │
-          │  2. remove_cycles()             ← Greedy-FAS
-          │     └─ reverse back-edges → DAG
-          │
-          │  3. LayerAssignment.assign()    ← longest-path
-          │     └─ assign each node a layer (rank)
-          │
-          │  4. insert_dummy_nodes()
-          │     └─ break multi-layer edges into unit segments
-          │
-          │  5. minimise_crossings()        ← barycenter heuristic
-          │     └─ 24-pass sweep reordering nodes within layers
-          │
-          │  6. assign_coordinates_padded() ← layer centering
-          │     └─ x,y positions + barycenter refinement
-          │
-          │  7. expand_compound_nodes()
-          │     └─ position member nodes inside compounds
-          │
-          │  8. route_edges()               ← orthogonal waypoints
-          │     └─ waypoints through layer gaps via dummy positions
-          │
-          ▼
-   ┌──────────────┐
-   │  Layout IR   │  layout/types.py
-   │ LayoutNode[] │  x, y, width, height per node
-   │ RoutedEdge[] │  waypoints per edge
-   └───────┬──────┘
-           │
-     ┌─────┼─────┐
-     │           │
-     ▼           ▼
-┌─────────┐ ┌─────────┐
-│  ASCII  │ │   SVG   │
-│Renderer │ │Renderer │
-│(current)│ │(future) │
-└────┬────┘ └─────────┘
-     │
-     │  Render phases:
-     │  1. Direction transform (transpose for LR/RL)
-     │  2. Paint compound/subgraph borders
-     │  3. Paint node boxes (shape-aware: ┌┐└┘ ╭╮╰╯ /\ ())
-     │  4. Paint edges (solid ─│, dotted ╌╎, thick ═║)
-     │  5. Paint arrowheads (► ◄ ▼ ▲) + edge labels
-     │  6. Junction merging (Arms OR: ─ + │ = ┼)
-     │  7. Direction flip (BT→vertical, RL→horizontal)
-     │
-     ▼
-ASCII/Unicode string
+   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+   │  Sugiyama    │    │  Sequence    │    │   Class      │
+   │  Layout      │    │  Layout      │    │   Layout     │
+   │  (current)   │    │  (future)    │    │   (future)   │
+   └──────┬───────┘    └──────┬───────┘    └──────┬───────┘
+          │                   │                   │
+          └─────────────┬─────┴───────────────────┘
+                        │
+                        ▼
+                 ┌──────────────┐
+                 │  Layout IR   │  layout/types.py
+                 │ LayoutNode[] │  x, y, width, height per node
+                 │ RoutedEdge[] │  waypoints per edge
+                 └───────┬──────┘
+                         │
+                   ┌─────┼─────┐
+                   │           │
+                   ▼           ▼
+              ┌─────────┐ ┌─────────┐
+              │  ASCII  │ │   SVG   │
+              │Renderer │ │Renderer │
+              │(current)│ │(future) │
+              └────┬────┘ └─────────┘
+                   │
+                   ▼
+            ASCII/Unicode string
+
+
+  Sugiyama Layout Algorithm Phases:
+
+  1. collapse_subgraphs()
+     └─ replace subgraph members with compound node
+
+  2. remove_cycles()             ← Greedy-FAS
+     └─ reverse back-edges → DAG
+
+  3. LayerAssignment.assign()    ← longest-path
+     └─ assign each node a layer (rank)
+
+  4. insert_dummy_nodes()
+     └─ break multi-layer edges into unit segments
+
+  5. minimise_crossings()        ← barycenter heuristic
+     └─ 24-pass sweep reordering nodes within layers
+
+  6. assign_coordinates_padded() ← layer centering
+     └─ x,y positions + barycenter refinement
+
+  7. expand_compound_nodes()
+     └─ position member nodes inside compounds
+
+  8. route_edges()               ← orthogonal waypoints
+     └─ waypoints through layer gaps via dummy positions
+
+
+  ASCII Render Phases:
+
+  1. Direction transform (transpose for LR/RL)
+  2. Paint compound/subgraph borders
+  3. Paint node boxes (shape-aware: ┌┐└┘ ╭╮╰╯ /\ ())
+  4. Paint edges (solid ─│, dotted ╌╎, thick ═║)
+  5. Paint arrowheads (► ◄ ▼ ▲) + edge labels
+  6. Junction merging (Arms OR: ─ + │ = ┼)
+  7. Direction flip (BT→vertical, RL→horizontal)
 ```
 
 ### Module Map
