@@ -1,0 +1,18 @@
+[package]
+name = "mermaid-ascii"
+version = "0.1.0"
+edition = "2024"
+description = "Mermaid flowchart syntax to ASCII/Unicode text renderer"
+authors = []
+
+[[bin]]
+name = "mermaid-ascii"
+path = "src/main.rs"
+
+[lib]
+name = "mermaid_ascii"
+path = "src/lib.rs"
+
+[dependencies]
+petgraph = "0.6"
+clap = { version = "4", features = ["derive"] }
