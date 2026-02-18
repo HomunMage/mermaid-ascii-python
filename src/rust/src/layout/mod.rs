@@ -10,19 +10,14 @@ pub use graph::GraphIR;
 pub use types::{LayoutNode, LayoutResult, Point, RoutedEdge};
 
 use crate::config::RenderConfig;
+use sugiyama::SugiyamaLayout;
 
 /// Run the full layout pipeline with default padding.
-///
-/// Returns (layout_nodes, routed_edges).
 pub fn full_layout(gir: &GraphIR) -> LayoutResult {
-    // TODO: implement in Phase 5
-    LayoutResult::new(gir.direction.clone())
+    SugiyamaLayout::layout(gir, sugiyama::NODE_PADDING)
 }
 
 /// Run the full layout pipeline with a custom config.
-///
-/// Returns (layout_nodes, routed_edges).
-pub fn full_layout_with_config(gir: &GraphIR, _config: &RenderConfig) -> LayoutResult {
-    // TODO: implement in Phase 5
-    LayoutResult::new(gir.direction.clone())
+pub fn full_layout_with_config(gir: &GraphIR, config: &RenderConfig) -> LayoutResult {
+    SugiyamaLayout::layout(gir, config.padding as i64)
 }
