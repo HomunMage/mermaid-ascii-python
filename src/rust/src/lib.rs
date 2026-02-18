@@ -4,9 +4,7 @@
 //! Mirrors Python's api.py.
 
 pub mod config;
+pub mod layout;
+pub mod parsers;
+pub mod renderers;
 pub mod syntax;
-
-// Stubs for future phases — uncomment as phases are implemented:
-// pub mod parsers;
-// pub mod layout;
-// pub mod renderers;
