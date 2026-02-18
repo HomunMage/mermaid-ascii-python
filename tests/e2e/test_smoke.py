@@ -6,9 +6,9 @@ from mermaid_ascii.__main__ import main
 
 
 def test_import():
-    import mermaid_ascii
+    from mermaid_ascii.api import render_dsl
 
-    assert mermaid_ascii is not None
+    assert render_dsl is not None
 
 
 def test_cli_help():

@@ -1,8 +1,8 @@
 """mermaid-ascii: Mermaid flowchart syntax to ASCII/Unicode text output."""
 
 from mermaid_ascii.ir.graph import GraphIR
-from mermaid_ascii.layout import full_layout_with_padding
-from mermaid_ascii.parsers import parse
+from mermaid_ascii.layout.engine import full_layout_with_padding
+from mermaid_ascii.parsers.registry import parse
 from mermaid_ascii.renderers.ascii import AsciiRenderer
 from mermaid_ascii.types import Direction
 

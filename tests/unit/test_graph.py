@@ -408,7 +408,7 @@ class TestFromParserIntegration:
     """End-to-end: parse DSL → AST → GraphIR."""
 
     def _build(self, dsl: str) -> GraphIR:
-        from mermaid_ascii.parsers import parse
+        from mermaid_ascii.parsers.registry import parse
 
         return GraphIR.from_ast(parse(dsl))
 

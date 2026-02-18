@@ -16,9 +16,8 @@ def detect_type(src: str) -> str:
         lower = line.lower()
         if lower.startswith("flowchart") or lower.startswith("graph"):
             return "flowchart"
-        # Future: sequence, class, er, etc.
         break
-    return "flowchart"  # default
+    return "flowchart"
 
 
 _PARSERS = {

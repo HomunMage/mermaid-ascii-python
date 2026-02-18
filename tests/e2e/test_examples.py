@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mermaid_ascii import render_dsl
+from mermaid_ascii.api import render_dsl
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent / "examples"
 
