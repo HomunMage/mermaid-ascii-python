@@ -9,6 +9,9 @@ pub mod parsers;
 pub mod renderers;
 pub mod syntax;
 
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 use crate::config::RenderConfig;
 use crate::layout::full_layout_with_config;
 use crate::layout::graph::GraphIR;
