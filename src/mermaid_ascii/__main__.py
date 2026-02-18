@@ -4,19 +4,7 @@ import sys
 
 import click
 
-from mermaid_ascii.layout.engine import full_layout_with_padding
-from mermaid_ascii.layout.graph import GraphIR
-from mermaid_ascii.parsers.registry import parse
-from mermaid_ascii.renderers.ascii import AsciiRenderer
-from mermaid_ascii.types import Direction
-
-_DIRECTION_MAP: dict[str, Direction] = {
-    "LR": Direction.LR,
-    "RL": Direction.RL,
-    "TD": Direction.TD,
-    "TB": Direction.TD,
-    "BT": Direction.BT,
-}
+from mermaid_ascii.api import render_dsl
 
 
 @click.command()
@@ -38,33 +26,10 @@ def main(input: str | None, use_ascii: bool, direction: str | None, padding: int
         text = sys.stdin.read()
 
     try:
-        ast_graph = parse(text)
+        rendered = render_dsl(text, unicode=not use_ascii, padding=padding, direction=direction)
     except ValueError as e:
-        click.echo(f"parse error:\n{e}", err=True)
+        click.echo(f"error: {e}", err=True)
         sys.exit(1)
-
-    if direction is not None:
-        key = direction.upper()
-        if key not in _DIRECTION_MAP:
-            click.echo(f"error: unknown direction '{direction}'; use LR, RL, TD, or BT", err=True)
-            sys.exit(1)
-        ast_graph.direction = _DIRECTION_MAP[key]
-
-    gir = GraphIR.from_ast(ast_graph)
-
-    if gir.node_count() == 0 and not gir.subgraph_members:
-        if output:
-            try:
-                with open(output, "w") as f:
-                    f.write("")
-            except OSError as e:
-                click.echo(f"error: cannot write '{output}': {e}", err=True)
-                sys.exit(1)
-        return
-
-    layout_result = full_layout_with_padding(gir, padding)
-    renderer = AsciiRenderer(unicode=not use_ascii)
-    rendered = renderer.render(layout_result)
 
     if output:
         try:

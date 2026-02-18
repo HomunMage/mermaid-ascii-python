@@ -295,14 +295,13 @@ Multi-phase compiler pipeline. Each phase transforms one representation to the n
 mermaid_ascii/
 ├── api.py                  # render_dsl() — public API
 ├── __main__.py             # CLI (click)
-├── types.py                # Direction, NodeShape, EdgeType enums
 ├── config.py               # RenderConfig dataclass
 ├── parsers/
 │   ├── registry.py         # detect_type() → parse() dispatch
 │   ├── base.py             # Parser protocol
 │   └── flowchart.py        # recursive descent parser
 ├── syntax/
-│   └── types.py            # AST: Graph, Node, Edge, Subgraph
+│   └── types.py            # Direction, NodeShape, EdgeType + AST: Graph, Node, Edge, Subgraph
 ├── layout/
 │   ├── engine.py           # full_layout() convenience API
 │   ├── graph.py            # GraphIR: networkx DiGraph wrapper (AST → graph)

@@ -4,7 +4,7 @@ from mermaid_ascii.layout.engine import full_layout_with_padding
 from mermaid_ascii.layout.graph import GraphIR
 from mermaid_ascii.parsers.registry import parse
 from mermaid_ascii.renderers.ascii import AsciiRenderer
-from mermaid_ascii.types import Direction
+from mermaid_ascii.syntax.types import Direction
 
 _DIRECTION_MAP: dict[str, Direction] = {
     "LR": Direction.LR,
@@ -35,8 +35,3 @@ def render_dsl(src: str, unicode: bool = True, padding: int = 1, direction: str 
     layout_result = full_layout_with_padding(gir, padding)
     renderer = AsciiRenderer(unicode=unicode)
     return renderer.render(layout_result)
-
-
-def render_dsl_padded(src: str, unicode: bool = True, padding: int = 1) -> str:
-    """Parse a Mermaid flowchart string and render with a custom padding value."""
-    return render_dsl(src, unicode=unicode, padding=padding)

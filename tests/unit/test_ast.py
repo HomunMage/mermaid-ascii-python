@@ -2,12 +2,14 @@
 
 from mermaid_ascii.syntax.types import (
     Attr,
+    Direction,
     Edge,
+    EdgeType,
     Graph,
     Node,
+    NodeShape,
     Subgraph,
 )
-from mermaid_ascii.types import Direction, EdgeType, NodeShape
 
 
 class TestDirection:

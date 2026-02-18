@@ -10,7 +10,7 @@ from mermaid_ascii.layout.sugiyama import (
     assign_coordinates_padded,
 )
 from mermaid_ascii.layout.types import LayoutResult
-from mermaid_ascii.types import Direction
+from mermaid_ascii.syntax.types import Direction
 
 
 def full_layout(gir: GraphIR) -> LayoutResult:

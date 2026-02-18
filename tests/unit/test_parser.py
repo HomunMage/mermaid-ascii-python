@@ -1,7 +1,7 @@
 """Tests for mermaid_ascii.parser — port of all 12 Rust parser tests."""
 
 from mermaid_ascii.parsers.registry import parse
-from mermaid_ascii.types import Direction, EdgeType, NodeShape
+from mermaid_ascii.syntax.types import Direction, EdgeType, NodeShape
 
 
 def test_parse_simple_chain():

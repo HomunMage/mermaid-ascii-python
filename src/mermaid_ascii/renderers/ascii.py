@@ -5,7 +5,7 @@ from __future__ import annotations
 from mermaid_ascii.layout.types import COMPOUND_PREFIX, DUMMY_PREFIX, LayoutNode, LayoutResult, Point, RoutedEdge
 from mermaid_ascii.renderers.canvas import Canvas, Rect
 from mermaid_ascii.renderers.charset import BoxChars, CharSet
-from mermaid_ascii.types import Direction, EdgeType, NodeShape
+from mermaid_ascii.syntax.types import Direction, EdgeType, NodeShape
 
 # ─── Node Rendering ──────────────────────────────────────────────────────────
 

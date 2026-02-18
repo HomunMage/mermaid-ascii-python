@@ -8,8 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from mermaid_ascii.syntax.types import Edge, Graph, Node, Subgraph
-from mermaid_ascii.types import Direction, EdgeType, NodeShape
+from mermaid_ascii.syntax.types import Direction, Edge, EdgeType, Graph, Node, NodeShape, Subgraph
 
 # ─── Tokenizer ───────────────────────────────────────────────────────────────
 

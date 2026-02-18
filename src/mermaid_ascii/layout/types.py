@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mermaid_ascii.types import Direction, NodeShape
+from mermaid_ascii.syntax.types import Direction, NodeShape
 
 
 @dataclass
