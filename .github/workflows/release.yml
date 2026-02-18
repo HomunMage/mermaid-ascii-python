@@ -53,19 +53,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack
-
-      - name: Build WASM (web)
-        run: wasm-pack build --target web --no-default-features --features wasm
+      - name: Build WASM with Docker
+        run: |
+          docker buildx build \
+            -f Dockerfile.wasm \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --output type=local,dest=./out .
 
       - name: Package WASM
-        run: tar czf mermaid-ascii-wasm.tar.gz -C pkg .
+        run: tar czf mermaid-ascii-wasm.tar.gz -C out .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -1,0 +1,11 @@
+FROM rust:latest AS builder
+
+RUN rustup target add wasm32-unknown-unknown
+RUN cargo install wasm-pack
+
+WORKDIR /app
+COPY . .
+RUN wasm-pack build --target web --no-default-features --features wasm
+
+FROM scratch AS export
+COPY --from=builder /app/pkg/ /
