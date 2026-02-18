@@ -32,8 +32,8 @@ from __future__ import annotations
 
 import networkx as nx
 
-from mermaid_ascii import ast as mast
-from mermaid_ascii.graph import EdgeData, GraphIR, NodeData
+from mermaid_ascii.ir import ast as mast
+from mermaid_ascii.ir.graph import EdgeData, GraphIR, NodeData
 from mermaid_ascii.layout import (
     COMPOUND_PREFIX,
     DUMMY_PREFIX,
@@ -606,7 +606,7 @@ class TestAssignCoordinatesPadded:
 class TestPhase6Integration:
     def _build_gir_from_dsl(self, dsl: str) -> GraphIR:
         """Helper: parse DSL text → AST → GraphIR."""
-        from mermaid_ascii.parser import parse
+        from mermaid_ascii.parsers import parse
 
         ast_graph = parse(dsl)
         return GraphIR.from_ast(ast_graph)
@@ -827,7 +827,7 @@ class TestComputeOrthogonalWaypoints:
 
 def _build_gir_simple(dsl: str) -> GraphIR:
     """Helper: parse DSL → AST → GraphIR."""
-    from mermaid_ascii.parser import parse
+    from mermaid_ascii.parsers import parse
 
     return GraphIR.from_ast(parse(dsl))
 
@@ -983,7 +983,7 @@ class TestCompoundInfo:
 
 class TestCollapseSubgraphs:
     def _parse_gir(self, dsl: str) -> GraphIR:
-        from mermaid_ascii.parser import parse
+        from mermaid_ascii.parsers import parse
 
         return GraphIR.from_ast(parse(dsl))
 
@@ -1228,7 +1228,7 @@ class TestExpandCompoundNodes:
 
 class TestFullLayout:
     def _parse_gir(self, dsl: str) -> GraphIR:
-        from mermaid_ascii.parser import parse
+        from mermaid_ascii.parsers import parse
 
         return GraphIR.from_ast(parse(dsl))
 

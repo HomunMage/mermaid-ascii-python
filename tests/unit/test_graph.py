@@ -1,15 +1,13 @@
 """Tests for mermaid_ascii.graph — GraphIR construction, cycle detection, and degree queries."""
 
-from mermaid_ascii.ast import (
-    Direction,
+from mermaid_ascii.ir.ast import (
     Edge,
-    EdgeType,
     Graph,
     Node,
-    NodeShape,
     Subgraph,
 )
-from mermaid_ascii.graph import EdgeData, GraphIR, NodeData
+from mermaid_ascii.ir.graph import EdgeData, GraphIR, NodeData
+from mermaid_ascii.types import Direction, EdgeType, NodeShape
 
 
 def _make_graph(
@@ -410,7 +408,7 @@ class TestFromParserIntegration:
     """End-to-end: parse DSL → AST → GraphIR."""
 
     def _build(self, dsl: str) -> GraphIR:
-        from mermaid_ascii.parser import parse
+        from mermaid_ascii.parsers import parse
 
         return GraphIR.from_ast(parse(dsl))
 

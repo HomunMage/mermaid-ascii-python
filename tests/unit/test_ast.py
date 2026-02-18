@@ -1,15 +1,13 @@
 """Tests for mermaid_ascii.ast — port of Rust ast tests."""
 
-from mermaid_ascii.ast import (
+from mermaid_ascii.ir.ast import (
     Attr,
-    Direction,
     Edge,
-    EdgeType,
     Graph,
     Node,
-    NodeShape,
     Subgraph,
 )
+from mermaid_ascii.types import Direction, EdgeType, NodeShape
 
 
 class TestDirection:

@@ -1,16 +1,13 @@
 """Tests for render.py — port of 12 Rust canvas/arms tests."""
 
-from mermaid_ascii.render import (
-    Arms,
-    BoxChars,
-    Canvas,
-    CharSet,
-    Rect,
+from mermaid_ascii.renderers.ascii import (
     flip_horizontal,
     flip_vertical,
     remap_char_horizontal,
     remap_char_vertical,
 )
+from mermaid_ascii.renderers.canvas import Canvas, Rect
+from mermaid_ascii.renderers.charset import Arms, BoxChars, CharSet
 
 
 class TestArmsFromChar:
