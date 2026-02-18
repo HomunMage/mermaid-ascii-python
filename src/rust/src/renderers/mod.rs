@@ -8,11 +8,12 @@ pub mod charset;
 
 pub use ascii::AsciiRenderer;
 
-use crate::layout::graph::GraphIR;
 use crate::layout::types::LayoutResult;
 
 /// Trait for diagram renderers.
+///
+/// Mirrors Python's Renderer protocol: render(result: LayoutResult) -> str
 pub trait Renderer {
     /// Render a laid-out graph to a string.
-    fn render(&self, gir: &GraphIR, layout: &LayoutResult) -> String;
+    fn render(&self, layout: &LayoutResult) -> String;
 }

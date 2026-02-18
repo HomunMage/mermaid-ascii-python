@@ -2,7 +2,89 @@
 //!
 //! Mirrors Python's renderers/charset.py.
 
-/// Arms represent which directions a junction character connects to.
+// ─── CharSet ─────────────────────────────────────────────────────────────────
+
+/// Which character set to use for box-drawing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CharSet {
+    #[default]
+    Unicode,
+    Ascii,
+}
+
+// ─── BoxChars ─────────────────────────────────────────────────────────────────
+
+/// Unicode or ASCII box-drawing character set.
+pub struct BoxChars {
+    pub top_left: char,
+    pub top_right: char,
+    pub bottom_left: char,
+    pub bottom_right: char,
+    pub horizontal: char,
+    pub vertical: char,
+    pub tee_right: char, // ├ left-T opening right
+    pub tee_left: char,  // ┤ right-T opening left
+    pub tee_down: char,  // ┬ top-T opening down
+    pub tee_up: char,    // ┴ bottom-T opening up
+    pub cross: char,     // ┼
+    pub arrow_right: char,
+    pub arrow_left: char,
+    pub arrow_down: char,
+    pub arrow_up: char,
+}
+
+impl BoxChars {
+    pub fn unicode() -> Self {
+        Self {
+            top_left: '┌',
+            top_right: '┐',
+            bottom_left: '└',
+            bottom_right: '┘',
+            horizontal: '─',
+            vertical: '│',
+            tee_right: '├',
+            tee_left: '┤',
+            tee_down: '┬',
+            tee_up: '┴',
+            cross: '┼',
+            arrow_right: '►',
+            arrow_left: '◄',
+            arrow_down: '▼',
+            arrow_up: '▲',
+        }
+    }
+
+    pub fn ascii() -> Self {
+        Self {
+            top_left: '+',
+            top_right: '+',
+            bottom_left: '+',
+            bottom_right: '+',
+            horizontal: '-',
+            vertical: '|',
+            tee_right: '+',
+            tee_left: '+',
+            tee_down: '+',
+            tee_up: '+',
+            cross: '+',
+            arrow_right: '>',
+            arrow_left: '<',
+            arrow_down: 'v',
+            arrow_up: '^',
+        }
+    }
+
+    pub fn for_charset(cs: CharSet) -> Self {
+        match cs {
+            CharSet::Unicode => Self::unicode(),
+            CharSet::Ascii => Self::ascii(),
+        }
+    }
+}
+
+// ─── Arms ────────────────────────────────────────────────────────────────────
+
+/// Which arms of a junction cell are active.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Arms {
     pub up: bool,
@@ -20,73 +102,145 @@ impl Arms {
             right,
         }
     }
-}
 
-/// Unicode box-drawing character set.
-pub struct BoxChars {
-    pub h: char,       // ─
-    pub v: char,       // │
-    pub tl: char,      // ┌
-    pub tr: char,      // ┐
-    pub bl: char,      // └
-    pub br: char,      // ┘
-    pub t_down: char,  // ┬
-    pub t_up: char,    // ┴
-    pub t_right: char, // ├
-    pub t_left: char,  // ┤
-    pub cross: char,   // ┼
-    pub arrow_r: char, // →
-    pub arrow_l: char, // ←
-    pub arrow_d: char, // ↓
-    pub arrow_u: char, // ↑
-}
-
-impl BoxChars {
-    pub fn unicode() -> Self {
-        Self {
-            h: '─',
-            v: '│',
-            tl: '┌',
-            tr: '┐',
-            bl: '└',
-            br: '┘',
-            t_down: '┬',
-            t_up: '┴',
-            t_right: '├',
-            t_left: '┤',
-            cross: '┼',
-            arrow_r: '→',
-            arrow_l: '←',
-            arrow_d: '↓',
-            arrow_u: '↑',
+    /// Decode a box-drawing character into its arms. Returns None for non-junction chars.
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            '─' | '-' => Some(Self::new(false, false, true, true)),
+            '│' | '|' => Some(Self::new(true, true, false, false)),
+            '┌' => Some(Self::new(false, true, false, true)),
+            '┐' => Some(Self::new(false, true, true, false)),
+            '└' => Some(Self::new(true, false, false, true)),
+            '┘' => Some(Self::new(true, false, true, false)),
+            '├' => Some(Self::new(true, true, false, true)),
+            '┤' => Some(Self::new(true, true, true, false)),
+            '┬' => Some(Self::new(false, true, true, true)),
+            '┴' => Some(Self::new(true, false, true, true)),
+            '┼' | '+' => Some(Self::new(true, true, true, true)),
+            _ => None,
         }
     }
 
-    pub fn ascii() -> Self {
+    /// Merge two Arms by OR-ing each direction.
+    pub fn merge(self, other: Self) -> Self {
         Self {
-            h: '-',
-            v: '|',
-            tl: '+',
-            tr: '+',
-            bl: '+',
-            br: '+',
-            t_down: '+',
-            t_up: '+',
-            t_right: '+',
-            t_left: '+',
-            cross: '+',
-            arrow_r: '>',
-            arrow_l: '<',
-            arrow_d: 'v',
-            arrow_u: '^',
+            up: self.up || other.up,
+            down: self.down || other.down,
+            left: self.left || other.left,
+            right: self.right || other.right,
+        }
+    }
+
+    /// Convert Arms to the appropriate box-drawing character for the given CharSet.
+    pub fn to_char(self, cs: CharSet) -> char {
+        let bc = BoxChars::for_charset(cs);
+        match (self.up, self.down, self.left, self.right) {
+            (false, false, false, false) => ' ',
+            (false, false, true, true) => bc.horizontal,
+            (true, true, false, false) => bc.vertical,
+            (false, true, false, true) => bc.top_left,
+            (false, true, true, false) => bc.top_right,
+            (true, false, false, true) => bc.bottom_left,
+            (true, false, true, false) => bc.bottom_right,
+            (true, true, false, true) => bc.tee_right,
+            (true, true, true, false) => bc.tee_left,
+            (false, true, true, true) => bc.tee_down,
+            (true, false, true, true) => bc.tee_up,
+            (true, true, true, true) => bc.cross,
+            // Single-arm fallbacks
+            (true, false, false, false) => bc.vertical,
+            (false, true, false, false) => bc.vertical,
+            (false, false, true, false) => bc.horizontal,
+            (false, false, false, true) => bc.horizontal,
         }
     }
 }
 
-/// Merge two junction characters by combining their arms.
-///
-/// TODO: implement full junction merging in Phase 4.
-pub fn merge_junction(existing: char, new: char, unicode: bool) -> char {
-    let _ = (existing, unicode);
-    new
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_arms_from_char_horizontal() {
+        let a = Arms::from_char('─').unwrap();
+        assert!(!a.up);
+        assert!(!a.down);
+        assert!(a.left);
+        assert!(a.right);
+    }
+
+    #[test]
+    fn test_arms_from_char_vertical() {
+        let a = Arms::from_char('│').unwrap();
+        assert!(a.up);
+        assert!(a.down);
+        assert!(!a.left);
+        assert!(!a.right);
+    }
+
+    #[test]
+    fn test_arms_from_char_unknown() {
+        assert!(Arms::from_char('X').is_none());
+        assert!(Arms::from_char(' ').is_none());
+    }
+
+    #[test]
+    fn test_arms_merge() {
+        let a = Arms::new(true, false, false, true);
+        let b = Arms::new(false, true, true, false);
+        let merged = a.merge(b);
+        assert_eq!(merged, Arms::new(true, true, true, true));
+    }
+
+    #[test]
+    fn test_arms_to_char_unicode() {
+        assert_eq!(
+            Arms::new(true, true, true, true).to_char(CharSet::Unicode),
+            '┼'
+        );
+        assert_eq!(
+            Arms::new(false, false, true, true).to_char(CharSet::Unicode),
+            '─'
+        );
+        assert_eq!(
+            Arms::new(true, true, false, false).to_char(CharSet::Unicode),
+            '│'
+        );
+    }
+
+    #[test]
+    fn test_arms_to_char_ascii() {
+        assert_eq!(
+            Arms::new(true, true, true, true).to_char(CharSet::Ascii),
+            '+'
+        );
+        assert_eq!(
+            Arms::new(false, false, true, true).to_char(CharSet::Ascii),
+            '-'
+        );
+        assert_eq!(
+            Arms::new(true, true, false, false).to_char(CharSet::Ascii),
+            '|'
+        );
+    }
+
+    #[test]
+    fn test_boxchars_unicode() {
+        let bc = BoxChars::unicode();
+        assert_eq!(bc.horizontal, '─');
+        assert_eq!(bc.vertical, '│');
+        assert_eq!(bc.top_left, '┌');
+        assert_eq!(bc.cross, '┼');
+    }
+
+    #[test]
+    fn test_boxchars_ascii() {
+        let bc = BoxChars::ascii();
+        assert_eq!(bc.horizontal, '-');
+        assert_eq!(bc.vertical, '|');
+        assert_eq!(bc.top_left, '+');
+        assert_eq!(bc.cross, '+');
+    }
 }

@@ -14,21 +14,15 @@ use crate::config::RenderConfig;
 /// Run the full layout pipeline with default padding.
 ///
 /// Returns (layout_nodes, routed_edges).
-pub fn full_layout(_gir: &GraphIR) -> LayoutResult {
+pub fn full_layout(gir: &GraphIR) -> LayoutResult {
     // TODO: implement in Phase 5
-    LayoutResult {
-        nodes: Vec::new(),
-        edges: Vec::new(),
-    }
+    LayoutResult::new(gir.direction.clone())
 }
 
 /// Run the full layout pipeline with a custom config.
 ///
 /// Returns (layout_nodes, routed_edges).
-pub fn full_layout_with_config(_gir: &GraphIR, _config: &RenderConfig) -> LayoutResult {
+pub fn full_layout_with_config(gir: &GraphIR, _config: &RenderConfig) -> LayoutResult {
     // TODO: implement in Phase 5
-    LayoutResult {
-        nodes: Vec::new(),
-        edges: Vec::new(),
-    }
+    LayoutResult::new(gir.direction.clone())
 }

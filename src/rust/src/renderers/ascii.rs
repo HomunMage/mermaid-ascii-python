@@ -3,7 +3,6 @@
 //! Mirrors Python's renderers/ascii.py.
 
 use super::Renderer;
-use crate::layout::graph::GraphIR;
 use crate::layout::types::LayoutResult;
 
 /// Renders a graph layout to ASCII/Unicode text using box-drawing characters.
@@ -18,7 +17,7 @@ impl AsciiRenderer {
 }
 
 impl Renderer for AsciiRenderer {
-    fn render(&self, _gir: &GraphIR, _layout: &LayoutResult) -> String {
+    fn render(&self, _layout: &LayoutResult) -> String {
         // TODO: implement in Phase 6
         String::new()
     }

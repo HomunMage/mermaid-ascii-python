@@ -10,11 +10,8 @@ pub struct SugiyamaLayout;
 
 impl SugiyamaLayout {
     /// Run the full Sugiyama layout pipeline on the given GraphIR.
-    pub fn layout(_gir: &GraphIR) -> LayoutResult {
+    pub fn layout(gir: &GraphIR) -> LayoutResult {
         // TODO: implement in Phase 5
-        LayoutResult {
-            nodes: Vec::new(),
-            edges: Vec::new(),
-        }
+        LayoutResult::new(gir.direction.clone())
     }
 }
