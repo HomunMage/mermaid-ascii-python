@@ -216,15 +216,16 @@ Multi-phase compiler pipeline. Each phase transforms one representation to the n
        ▼                   ▼                    ▼
 ┌──────────────┐    ┌──────────────┐    ┌────────────────┐
 │  Flowchart   │    │  Sequence    │    │ Architecture   │
-│  AST         │    │  AST         │    │ AST            │
+│  AST         │    │  AST         │    │ AST            │  syntax/types.py
 │  (current)   │    │  (future)    │    │ (future)       │
 └──────┬───────┘    └──────┬───────┘    └───────┬────────┘
        │                   │                    │
        │ graph(Sugiyama)   │ timeline(linear)   │ grid(force)
+       │ layout/graph.py   │                    │
        ▼                   ▼                    ▼
 ┌──────────────┐    ┌──────────────┐    ┌────────────────┐
 │  Sugiyama    │    │  Sequence    │    │ Architecture   │
-│  Layout      │    │  Layout      │    │ Layout         │
+│  Layout      │    │  Layout      │    │ Layout         │  layout/sugiyama.py
 │  (current)   │    │  (future)    │    │ (future)       │
 └──────┬───────┘    └──────┬───────┘    └───────┬────────┘
        │                   │                    │
@@ -301,12 +302,12 @@ mermaid_ascii/
 │   ├── base.py             # Parser protocol
 │   └── flowchart.py        # recursive descent parser
 ├── syntax/
-│   ├── types.py            # AST: Graph, Node, Edge, Subgraph
-│   └── graph.py            # GraphIR: networkx DiGraph wrapper
+│   └── types.py            # AST: Graph, Node, Edge, Subgraph
 ├── layout/
 │   ├── engine.py           # full_layout() convenience API
+│   ├── graph.py            # GraphIR: networkx DiGraph wrapper (AST → graph)
 │   ├── sugiyama.py         # Sugiyama algorithm (8 phases)
-│   └── types.py            # LayoutNode, RoutedEdge, Point
+│   └── types.py            # LayoutNode, LayoutResult, RoutedEdge, Point
 └── renderers/
     ├── base.py             # Renderer protocol
     ├── ascii.py            # ASCII/Unicode renderer (7 phases)
