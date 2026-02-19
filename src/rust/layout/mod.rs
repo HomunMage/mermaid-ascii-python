@@ -3,6 +3,7 @@
 //! Mirrors Python's layout/engine.py.
 
 pub mod graph;
+pub mod pathfinder;
 pub mod sugiyama;
 pub mod types;
 

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use super::Renderer;
 use super::canvas::{Canvas, Rect};
-use super::charset::{BoxChars, CharSet};
+use super::charset::{Arms, BoxChars, CharSet};
 use crate::layout::types::{
     COMPOUND_PREFIX, DUMMY_PREFIX, LayoutNode, LayoutResult, Point, RoutedEdge,
 };
@@ -196,22 +196,79 @@ fn paint_edge(canvas: &mut Canvas, re: &RoutedEdge, edge_type: &EdgeType) {
     let (h_ch, v_ch) = line_chars_for(edge_type, cs);
     let bc = BoxChars::for_charset(cs);
 
+    // Draw interior cells of each segment (excluding waypoint endpoints)
     for i in 0..re.waypoints.len() - 1 {
         let p0 = &re.waypoints[i];
         let p1 = &re.waypoints[i + 1];
-        if p0.y == p1.y && p0.y >= 0 {
-            let y = p0.y as usize;
-            let x0 = p0.x.max(0) as usize;
-            let x1 = p1.x.max(0) as usize;
-            canvas.hline(y, x0, x1, h_ch);
-        } else if p0.x == p1.x && p0.x >= 0 {
-            let x = p0.x as usize;
-            let y0 = p0.y.max(0) as usize;
-            let y1 = p1.y.max(0) as usize;
-            canvas.vline(x, y0, y1, v_ch);
+        if p0.y == p1.y {
+            // horizontal segment
+            let lo = p0.x.min(p1.x);
+            let hi = p0.x.max(p1.x);
+            for col in (lo + 1)..hi {
+                if col >= 0 && p0.y >= 0 {
+                    canvas.set_merge(col as usize, p0.y as usize, h_ch);
+                }
+            }
+        } else if p0.x == p1.x {
+            // vertical segment
+            let lo = p0.y.min(p1.y);
+            let hi = p0.y.max(p1.y);
+            for row in (lo + 1)..hi {
+                if p0.x >= 0 && row >= 0 {
+                    canvas.set_merge(p0.x as usize, row as usize, v_ch);
+                }
+            }
         }
     }
 
+    // At each waypoint, compute exact arms from incoming/outgoing directions
+    for i in 0..re.waypoints.len() {
+        let p = &re.waypoints[i];
+        let mut arms = Arms::new(false, false, false, false);
+
+        if i > 0 {
+            let prev = &re.waypoints[i - 1];
+            if prev.x < p.x {
+                arms.left = true;
+            } else if prev.x > p.x {
+                arms.right = true;
+            } else if prev.y < p.y {
+                arms.up = true;
+            } else if prev.y > p.y {
+                arms.down = true;
+            }
+        }
+
+        if i < re.waypoints.len() - 1 {
+            let nxt = &re.waypoints[i + 1];
+            if nxt.x > p.x {
+                arms.right = true;
+            } else if nxt.x < p.x {
+                arms.left = true;
+            } else if nxt.y > p.y {
+                arms.down = true;
+            } else if nxt.y < p.y {
+                arms.up = true;
+            }
+        }
+
+        // Merge with existing character
+        if p.x >= 0 && p.y >= 0 {
+            let col = p.x as usize;
+            let row = p.y as usize;
+            if row < canvas.height && col < canvas.width {
+                let existing = canvas.get(col, row);
+                if let Some(ea) = Arms::from_char(existing) {
+                    let merged = ea.merge(arms);
+                    canvas.set(col, row, merged.to_char(cs));
+                } else {
+                    canvas.set(col, row, arms.to_char(cs));
+                }
+            }
+        }
+    }
+
+    // Place arrowheads
     if is_arrow_type(edge_type) {
         let last = &re.waypoints[re.waypoints.len() - 1];
         let prev = &re.waypoints[re.waypoints.len() - 2];
@@ -252,6 +309,76 @@ fn paint_edge(canvas: &mut Canvas, re: &RoutedEdge, edge_type: &EdgeType) {
         let label_y = (lp.y - 1).max(0);
         if lp.x >= 0 && label_y >= 0 {
             canvas.write_str(lp.x as usize, label_y as usize, label);
+        }
+    }
+}
+
+fn paint_exit_stubs(canvas: &mut Canvas, edges: &[RoutedEdge], nodes: &[&LayoutNode]) {
+    let node_map: HashMap<&str, &&LayoutNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+
+    for re in edges {
+        if re.waypoints.is_empty() {
+            continue;
+        }
+        let Some(from_node) = node_map.get(re.from_id.as_str()) else {
+            continue;
+        };
+
+        let first_wp = &re.waypoints[0];
+        let nx = from_node.x;
+        let ny = from_node.y;
+        let nw = from_node.width;
+        let nh = from_node.height;
+        let center_x = nx + nw / 2;
+        let center_y = ny + nh / 2;
+
+        let (stub_x, stub_y, arm_dir): (i64, i64, &str) = if first_wp.y >= ny + nh {
+            // Edge exits from bottom border
+            (center_x, ny + nh - 1, "down")
+        } else if first_wp.y < ny {
+            // Edge exits from top border
+            (center_x, ny, "up")
+        } else if first_wp.x >= nx + nw {
+            // Edge exits from right border
+            (nx + nw - 1, center_y, "right")
+        } else if first_wp.x < nx {
+            // Edge exits from left border
+            (nx, center_y, "left")
+        } else {
+            // First waypoint inside node — default to bottom
+            (center_x, ny + nh - 1, "down")
+        };
+
+        if stub_x < 0 || stub_y < 0 {
+            continue;
+        }
+        let col = stub_x as usize;
+        let row = stub_y as usize;
+        if row >= canvas.height || col >= canvas.width {
+            continue;
+        }
+
+        let existing = canvas.get(col, row);
+        if let Some(ea) = Arms::from_char(existing) {
+            let mut merged = ea;
+            match arm_dir {
+                "down" => merged.down = true,
+                "up" => merged.up = true,
+                "right" => merged.right = true,
+                "left" => merged.left = true,
+                _ => {}
+            }
+            canvas.set(col, row, merged.to_char(canvas.charset));
+        } else {
+            let bc = BoxChars::for_charset(canvas.charset);
+            let stub_char = match arm_dir {
+                "down" => bc.tee_down,
+                "up" => bc.tee_up,
+                "right" => bc.tee_right,
+                "left" => bc.tee_left,
+                _ => continue,
+            };
+            canvas.set(col, row, stub_char);
         }
     }
 }
@@ -446,6 +573,9 @@ impl Renderer for AsciiRenderer {
         for re in &edges {
             paint_edge(&mut canvas, re, &re.edge_type);
         }
+
+        // Paint exit stubs on source node borders (┬ at bottom center)
+        paint_exit_stubs(&mut canvas, &edges, &real_nodes);
 
         let rendered = canvas.render_to_string();
 

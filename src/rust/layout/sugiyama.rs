@@ -8,7 +8,7 @@
 //!   3. Dummy node insertion
 //!   4. Crossing minimisation (barycenter)
 //!   5. Coordinate assignment
-//!   6. Edge routing (orthogonal)
+//!   6. Edge routing (A* pathfinding)
 //!   7. Subgraph collapse/expand
 
 use std::collections::{HashMap, HashSet};
@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use super::graph::{EdgeData, GraphIR, NodeData};
+use super::pathfinder::{OccupancyGrid, a_star, simplify_path};
 use super::types::{COMPOUND_PREFIX, DUMMY_PREFIX, LayoutNode, LayoutResult, Point, RoutedEdge};
 use crate::syntax::types::{Direction, EdgeType, NodeShape};
 
@@ -808,109 +809,68 @@ pub fn assign_coordinates_padded(
 
 // ─── Edge Routing ────────────────────────────────────────────────────────────
 
-fn compute_orthogonal_waypoints(
-    from_node: &LayoutNode,
-    to_node: &LayoutNode,
-    layer_top_y: &[i64],
-    layer_bottom_y: &[i64],
-    dummy_xs: &[i64],
-) -> Vec<Point> {
-    let exit_x = from_node.x + from_node.width / 2;
-    let exit_y = from_node.y + from_node.height - 1;
-    let entry_x = to_node.x + to_node.width / 2;
-    let entry_y = to_node.y;
-
-    let src_layer = from_node.layer;
-    let tgt_layer = to_node.layer;
-
-    if src_layer == tgt_layer {
-        let bot = layer_bottom_y.get(src_layer).copied().unwrap_or(exit_y + 1);
-        let below_y = bot + V_GAP / 2;
-        return vec![
-            Point::new(exit_x, exit_y),
-            Point::new(exit_x, below_y),
-            Point::new(entry_x, below_y),
-            Point::new(entry_x, entry_y),
-        ];
-    }
-
-    let low_layer = src_layer.min(tgt_layer);
-    let high_layer = src_layer.max(tgt_layer);
-
-    let mut waypoints = vec![Point::new(exit_x, exit_y)];
-
-    let gaps = high_layer - low_layer;
-    for gap_idx in 0..gaps {
-        let gap = low_layer + gap_idx;
-        let gap_start = layer_bottom_y.get(gap).copied().unwrap_or(exit_y + 1);
-        let gap_end = layer_top_y
-            .get(gap + 1)
-            .copied()
-            .unwrap_or(gap_start + V_GAP);
-        let mid_y = gap_start + (gap_end - gap_start).max(0) / 2;
-
-        let gap_x = if gap_idx < dummy_xs.len() {
-            dummy_xs[gap_idx]
-        } else if gap_idx == 0 {
-            exit_x
-        } else {
-            entry_x
-        };
-
-        let last_wp = waypoints.last().unwrap().clone();
-        if last_wp.x != gap_x {
-            waypoints.push(Point::new(gap_x, last_wp.y));
+fn build_occupancy_grid(layout_nodes: &[LayoutNode]) -> OccupancyGrid {
+    let max_x = layout_nodes
+        .iter()
+        .map(|n| n.x + n.width)
+        .max()
+        .unwrap_or(40)
+        + 10;
+    let max_y = layout_nodes
+        .iter()
+        .map(|n| n.y + n.height)
+        .max()
+        .unwrap_or(10)
+        + 10;
+    let mut grid = OccupancyGrid::create(max_x as usize, max_y as usize);
+    for n in layout_nodes {
+        if !n.id.starts_with(DUMMY_PREFIX) {
+            grid.mark_rect_blocked(n.x, n.y, n.width, n.height);
         }
-        waypoints.push(Point::new(gap_x, mid_y));
+    }
+    grid
+}
+
+/// Ensure first and last segments are vertical for clean TD rendering.
+fn ensure_vertical_endpoints(waypoints: &mut Vec<Point>) {
+    if waypoints.len() < 2 {
+        return;
     }
 
-    let last_wp = waypoints.last().unwrap().clone();
-    if last_wp.x != entry_x {
-        waypoints.push(Point::new(entry_x, last_wp.y));
+    // Fix last segment: ensure vertical approach to target
+    let len = waypoints.len();
+    let last = waypoints[len - 1].clone();
+    let prev = waypoints[len - 2].clone();
+    if last.y == prev.y && last.x != prev.x {
+        let new_y = if prev.y > 0 { prev.y - 1 } else { prev.y };
+        if new_y != prev.y {
+            waypoints[len - 2] = Point::new(prev.x, new_y);
+            let insert_idx = waypoints.len() - 1;
+            waypoints.insert(insert_idx, Point::new(last.x, new_y));
+        }
     }
-    waypoints.push(Point::new(entry_x, entry_y));
 
-    waypoints
+    // Fix first segment: ensure vertical exit from source
+    if waypoints.len() >= 2 {
+        let first = waypoints[0].clone();
+        let second = waypoints[1].clone();
+        if first.y == second.y && first.x != second.x {
+            let new_y = first.y + 1;
+            waypoints[1] = Point::new(second.x, new_y);
+            waypoints.insert(1, Point::new(first.x, new_y));
+        }
+    }
 }
 
 pub fn route_edges(
     gir: &GraphIR,
     layout_nodes: &[LayoutNode],
-    aug: &AugmentedGraph,
+    _aug: &AugmentedGraph,
     reversed_edges: &HashSet<(String, String)>,
 ) -> Vec<RoutedEdge> {
     let node_map: HashMap<&str, &LayoutNode> =
         layout_nodes.iter().map(|n| (n.id.as_str(), n)).collect();
-
-    let layer_count = layout_nodes
-        .iter()
-        .map(|n| n.layer)
-        .max()
-        .map(|m| m + 1)
-        .unwrap_or(1);
-    let mut layer_top_y: Vec<i64> = vec![i64::MAX; layer_count.max(1)];
-    let mut layer_bottom_y: Vec<i64> = vec![0i64; layer_count.max(1)];
-    for n in layout_nodes {
-        if n.y < layer_top_y[n.layer] {
-            layer_top_y[n.layer] = n.y;
-        }
-        let bot = n.y + n.height;
-        if bot > layer_bottom_y[n.layer] {
-            layer_bottom_y[n.layer] = bot;
-        }
-    }
-
-    // Build dummy_xs_map from aug dummy edges
-    let mut dummy_xs_map: HashMap<(String, String), Vec<i64>> = HashMap::new();
-    for de in &aug.dummy_edges {
-        let xs: Vec<i64> = de
-            .dummy_ids
-            .iter()
-            .filter_map(|did| node_map.get(did.as_str()))
-            .map(|ln| ln.x + ln.width / 2)
-            .collect();
-        dummy_xs_map.insert((de.original_src.clone(), de.original_tgt.clone()), xs);
-    }
+    let grid = build_occupancy_grid(layout_nodes);
 
     let mut routes: Vec<RoutedEdge> = Vec::new();
 
@@ -941,18 +901,31 @@ pub fn route_edges(
             None => continue,
         };
 
-        let empty_xs = Vec::new();
-        let dummy_xs = dummy_xs_map
-            .get(&(vis_from.clone(), vis_to.clone()))
-            .unwrap_or(&empty_xs);
+        // Exit: one cell below source box bottom border
+        let exit_x = from_node.x + from_node.width / 2;
+        let exit_y = from_node.y + from_node.height; // first row below box
 
-        let waypoints = compute_orthogonal_waypoints(
-            from_node,
-            to_node,
-            &layer_top_y,
-            &layer_bottom_y,
-            dummy_xs,
-        );
+        // Entry: one cell above target box top border
+        let entry_x = to_node.x + to_node.width / 2;
+        let entry_y = to_node.y - 1; // one row above box
+
+        let start = Point::new(exit_x, exit_y);
+        let end = Point::new(entry_x, entry_y);
+
+        let mut waypoints = if let Some(path) = a_star(&grid, start.clone(), end.clone()) {
+            simplify_path(path)
+        } else {
+            // Fallback: direct orthogonal path
+            let mid_y = (exit_y + entry_y) / 2;
+            vec![
+                start,
+                Point::new(exit_x, mid_y),
+                Point::new(entry_x, mid_y),
+                end,
+            ]
+        };
+
+        ensure_vertical_endpoints(&mut waypoints);
 
         routes.push(RoutedEdge {
             from_id: vis_from,
