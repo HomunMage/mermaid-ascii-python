@@ -13,12 +13,12 @@ Phases:
 from __future__ import annotations
 
 import copy
-import sys
 from dataclasses import dataclass, field
 
 import networkx as nx
 
 from mermaid_ascii.layout.graph import EdgeData, GraphIR, NodeData
+from mermaid_ascii.layout.pathfinder import OccupancyGrid, a_star, simplify_path
 from mermaid_ascii.layout.types import COMPOUND_PREFIX, DUMMY_PREFIX, LayoutNode, LayoutResult, Point, RoutedEdge
 from mermaid_ascii.syntax.types import Direction, EdgeType, NodeShape
 
@@ -455,29 +455,57 @@ def assign_coordinates_padded(
 # ─── Edge Routing ────────────────────────────────────────────────────────────
 
 
+def _build_occupancy_grid(layout_nodes: list[LayoutNode]) -> OccupancyGrid:
+    """Build an occupancy grid from node positions, blocking real node cells."""
+    max_x = max((n.x + n.width for n in layout_nodes), default=40) + 10
+    max_y = max((n.y + n.height for n in layout_nodes), default=10) + 10
+    grid = OccupancyGrid.create(max_x, max_y)
+    for n in layout_nodes:
+        if not n.id.startswith(DUMMY_PREFIX):
+            grid.mark_rect_blocked(n.x, n.y, n.width, n.height)
+    return grid
+
+
+def _ensure_vertical_endpoints(waypoints: list[Point]) -> list[Point]:
+    """Ensure first and last segments are vertical for clean TD rendering.
+
+    If the A* path ends with a horizontal segment, restructure so
+    the arrow points down (not sideways).
+    """
+    if len(waypoints) < 2:
+        return waypoints
+
+    # Fix last segment: ensure vertical approach to target
+    last = waypoints[-1]
+    prev = waypoints[-2]
+    if last.y == prev.y and last.x != prev.x:
+        # Horizontal last segment — shift horizontal one row up, add vertical descent
+        new_y = prev.y - 1 if prev.y > 0 else prev.y
+        if new_y != prev.y:
+            waypoints[-2] = Point(x=prev.x, y=new_y)
+            waypoints.insert(-1, Point(x=last.x, y=new_y))
+
+    # Fix first segment: ensure vertical exit from source
+    if len(waypoints) >= 2:
+        first = waypoints[0]
+        second = waypoints[1]
+        if first.y == second.y and first.x != second.x:
+            new_y = first.y + 1
+            waypoints[1] = Point(x=second.x, y=new_y)
+            waypoints.insert(1, Point(x=first.x, y=new_y))
+
+    return waypoints
+
+
 def route_edges(
     gir: GraphIR,
     layout_nodes: list[LayoutNode],
     aug: AugmentedGraph,
     reversed_edges: set[tuple[str, str]],
 ) -> list[RoutedEdge]:
-    """Route all edges orthogonally through inter-layer gaps."""
+    """Route all edges using A* pathfinding on the character grid."""
     node_map: dict[str, LayoutNode] = {n.id: n for n in layout_nodes}
-
-    layer_count = max((n.layer for n in layout_nodes), default=-1) + 1
-    layer_top_y: list[int] = [sys.maxsize] * max(layer_count, 1)
-    layer_bottom_y: list[int] = [0] * max(layer_count, 1)
-    for n in layout_nodes:
-        if n.y < layer_top_y[n.layer]:
-            layer_top_y[n.layer] = n.y
-        bot = n.y + n.height
-        if bot > layer_bottom_y[n.layer]:
-            layer_bottom_y[n.layer] = bot
-
-    dummy_xs_map: dict[tuple[str, str], list[int]] = {}
-    for de in aug.dummy_edges:
-        xs = [node_map[did].x + node_map[did].width // 2 for did in de.dummy_ids if did in node_map]
-        dummy_xs_map[(de.original_src, de.original_tgt)] = xs
+    grid = _build_occupancy_grid(layout_nodes)
 
     routes: list[RoutedEdge] = []
 
@@ -498,9 +526,27 @@ def route_edges(
         if from_node is None or to_node is None:
             continue
 
-        dummy_xs = dummy_xs_map.get((vis_from, vis_to), [])
+        # Exit: one cell below source box bottom border
+        exit_x = from_node.x + from_node.width // 2
+        exit_y = from_node.y + from_node.height  # first row below box
 
-        waypoints = _compute_orthogonal_waypoints(from_node, to_node, layer_top_y, layer_bottom_y, dummy_xs)
+        # Entry: one cell above target box top border
+        entry_x = to_node.x + to_node.width // 2
+        entry_y = to_node.y - 1  # one row above box
+
+        start = Point(x=exit_x, y=exit_y)
+        end = Point(x=entry_x, y=entry_y)
+
+        path = a_star(grid, start, end)
+        if path is not None:
+            waypoints = simplify_path(path)
+        else:
+            # Fallback: direct orthogonal path
+            mid_y = (exit_y + entry_y) // 2
+            waypoints = [start, Point(x=exit_x, y=mid_y), Point(x=entry_x, y=mid_y), end]
+
+        # Ensure last segment is vertical (arrow points down/up, not sideways)
+        waypoints = _ensure_vertical_endpoints(waypoints)
 
         label = edge_data.label if edge_data else None
         edge_type = edge_data.edge_type if edge_data else None
@@ -508,63 +554,6 @@ def route_edges(
         routes.append(RoutedEdge(from_id=vis_from, to_id=vis_to, label=label, edge_type=edge_type, waypoints=waypoints))
 
     return routes
-
-
-def _compute_orthogonal_waypoints(
-    from_node: LayoutNode,
-    to_node: LayoutNode,
-    layer_top_y: list[int],
-    layer_bottom_y: list[int],
-    dummy_xs: list[int],
-) -> list[Point]:
-    exit_x = from_node.x + from_node.width // 2
-    exit_y = from_node.y + from_node.height - 1
-    entry_x = to_node.x + to_node.width // 2
-    entry_y = to_node.y
-
-    src_layer = from_node.layer
-    tgt_layer = to_node.layer
-
-    if src_layer == tgt_layer:
-        bot = layer_bottom_y[src_layer] if src_layer < len(layer_bottom_y) else exit_y + 1
-        below_y = bot + V_GAP // 2
-        return [
-            Point(x=exit_x, y=exit_y),
-            Point(x=exit_x, y=below_y),
-            Point(x=entry_x, y=below_y),
-            Point(x=entry_x, y=entry_y),
-        ]
-
-    low_layer = min(src_layer, tgt_layer)
-    high_layer = max(src_layer, tgt_layer)
-
-    waypoints: list[Point] = [Point(x=exit_x, y=exit_y)]
-
-    gaps = high_layer - low_layer
-    for gap_idx in range(gaps):
-        gap = low_layer + gap_idx
-        gap_start = layer_bottom_y[gap] if gap < len(layer_bottom_y) else exit_y + 1
-        gap_end = layer_top_y[gap + 1] if gap + 1 < len(layer_top_y) else gap_start + V_GAP
-        mid_y = gap_start + max(0, gap_end - gap_start) // 2
-
-        if gap_idx < len(dummy_xs):
-            gap_x = dummy_xs[gap_idx]
-        elif gap_idx == 0:
-            gap_x = exit_x
-        else:
-            gap_x = entry_x
-
-        last_wp = waypoints[-1]
-        if last_wp.x != gap_x:
-            waypoints.append(Point(x=gap_x, y=last_wp.y))
-        waypoints.append(Point(x=gap_x, y=mid_y))
-
-    last_wp = waypoints[-1]
-    if last_wp.x != entry_x:
-        waypoints.append(Point(x=entry_x, y=last_wp.y))
-    waypoints.append(Point(x=entry_x, y=entry_y))
-
-    return waypoints
 
 
 # ─── Compound Node (Subgraph Collapse/Expand) ───────────────────────────────

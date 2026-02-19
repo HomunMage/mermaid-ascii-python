@@ -6,7 +6,7 @@ import sys
 
 from mermaid_ascii.layout.types import COMPOUND_PREFIX, DUMMY_PREFIX, LayoutNode, LayoutResult, Point, RoutedEdge
 from mermaid_ascii.renderers.canvas import Canvas, Rect
-from mermaid_ascii.renderers.charset import BoxChars, CharSet
+from mermaid_ascii.renderers.charset import Arms, BoxChars, CharSet
 from mermaid_ascii.syntax.types import Direction, EdgeType, NodeShape
 
 # ─── Node Rendering ──────────────────────────────────────────────────────────
@@ -142,14 +142,57 @@ def _paint_edge(canvas: Canvas, re: RoutedEdge, edge_type: EdgeType) -> None:
     h_ch, v_ch = _line_chars_for(edge_type, cs)
     bc = BoxChars.for_charset(cs)
 
+    # Draw interior cells of each segment (excluding waypoint endpoints)
     for i in range(len(re.waypoints) - 1):
         p0 = re.waypoints[i]
         p1 = re.waypoints[i + 1]
-        if p0.y == p1.y:
-            canvas.hline(p0.y, p0.x, p1.x, h_ch)
-        elif p0.x == p1.x:
-            canvas.vline(p0.x, p0.y, p1.y, v_ch)
+        if p0.y == p1.y:  # horizontal
+            lo, hi = (min(p0.x, p1.x), max(p0.x, p1.x))
+            for col in range(lo + 1, hi):
+                canvas.set_merge(col, p0.y, h_ch)
+        elif p0.x == p1.x:  # vertical
+            lo, hi = (min(p0.y, p1.y), max(p0.y, p1.y))
+            for row in range(lo + 1, hi):
+                canvas.set_merge(p0.x, row, v_ch)
 
+    # At each waypoint, compute exact arms from incoming/outgoing directions
+    for i in range(len(re.waypoints)):
+        p = re.waypoints[i]
+        arms = Arms()
+
+        if i > 0:
+            prev = re.waypoints[i - 1]
+            if prev.x < p.x:
+                arms.left = True
+            elif prev.x > p.x:
+                arms.right = True
+            elif prev.y < p.y:
+                arms.up = True
+            elif prev.y > p.y:
+                arms.down = True
+
+        if i < len(re.waypoints) - 1:
+            nxt = re.waypoints[i + 1]
+            if nxt.x > p.x:
+                arms.right = True
+            elif nxt.x < p.x:
+                arms.left = True
+            elif nxt.y > p.y:
+                arms.down = True
+            elif nxt.y < p.y:
+                arms.up = True
+
+        # Merge with existing character
+        existing = canvas.get(p.x, p.y)
+        ea = Arms.from_char(existing)
+        if ea is not None:
+            merged = ea.merge(arms)
+            if 0 <= p.y < canvas.height and 0 <= p.x < canvas.width:
+                canvas.cells[p.y][p.x] = merged.to_char(cs)
+        elif 0 <= p.y < canvas.height and 0 <= p.x < canvas.width:
+            canvas.cells[p.y][p.x] = arms.to_char(cs)
+
+    # Place arrowheads
     arrow_types = {
         EdgeType.Arrow,
         EdgeType.DottedArrow,
@@ -191,6 +234,68 @@ def _paint_edge(canvas: Canvas, re: RoutedEdge, edge_type: EdgeType) -> None:
         lp = re.waypoints[mid]
         label_y = max(0, lp.y - 1)
         canvas.write_str(lp.x, label_y, re.label)
+
+
+def _paint_exit_stubs(canvas: Canvas, edges: list[RoutedEdge], nodes: list[LayoutNode]) -> None:
+    """Paint exit stubs on source node borders to connect boxes to edges.
+
+    Determines exit direction from the first waypoint relative to the node,
+    and adds the appropriate arm on the node border.
+    """
+    node_map: dict[str, LayoutNode] = {n.id: n for n in nodes}
+
+    for re in edges:
+        if len(re.waypoints) < 1:
+            continue
+        from_node = node_map.get(re.from_id)
+        if from_node is None:
+            continue
+
+        first_wp = re.waypoints[0]
+        # Determine which border the edge exits from
+        nx, ny = from_node.x, from_node.y
+        nw, nh = from_node.width, from_node.height
+        center_x = nx + nw // 2
+        center_y = ny + nh // 2
+
+        if first_wp.y >= ny + nh:
+            # Edge exits from bottom border
+            stub_x = center_x
+            stub_y = ny + nh - 1
+            arm_to_add = "down"
+        elif first_wp.y < ny:
+            # Edge exits from top border
+            stub_x = center_x
+            stub_y = ny
+            arm_to_add = "up"
+        elif first_wp.x >= nx + nw:
+            # Edge exits from right border
+            stub_x = nx + nw - 1
+            stub_y = center_y
+            arm_to_add = "right"
+        elif first_wp.x < nx:
+            # Edge exits from left border
+            stub_x = nx
+            stub_y = center_y
+            arm_to_add = "left"
+        else:
+            # First waypoint is inside node — default to bottom
+            stub_x = center_x
+            stub_y = ny + nh - 1
+            arm_to_add = "down"
+
+        existing = canvas.get(stub_x, stub_y)
+        ea = Arms.from_char(existing)
+        if ea is not None:
+            merged = Arms(up=ea.up, down=ea.down, left=ea.left, right=ea.right)
+            setattr(merged, arm_to_add, True)
+            if 0 <= stub_y < canvas.height and 0 <= stub_x < canvas.width:
+                canvas.cells[stub_y][stub_x] = merged.to_char(canvas.charset)
+        else:
+            bc = BoxChars.for_charset(canvas.charset)
+            stub_char = {"down": bc.tee_down, "up": bc.tee_up, "right": bc.tee_right, "left": bc.tee_left}
+            if 0 <= stub_y < canvas.height and 0 <= stub_x < canvas.width:
+                canvas.set(stub_x, stub_y, stub_char[arm_to_add])
 
 
 # ─── Direction Transforms ────────────────────────────────────────────────────
@@ -348,6 +453,9 @@ class AsciiRenderer:
 
         for re in edges:
             _paint_edge(canvas, re, re.edge_type)
+
+        # Paint exit stubs on source node borders (┬ at bottom center)
+        _paint_exit_stubs(canvas, edges, real_nodes)
 
         rendered = canvas.to_string()
 

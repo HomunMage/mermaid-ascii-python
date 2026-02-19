@@ -10,17 +10,17 @@ echo 'graph TD
 
 ┌───┐
 │ A │
-└─┼─┘
+└─┬─┘
   │
   │
-  │
-┌─▼─┐
+  ▼
+┌───┐
 │ B │
-└─┼─┘
+└─┬─┘
   │
   │
-  │
-┌─▼─┐
+  ▼
+┌───┐
 │ C │
 └───┘
 ```
@@ -79,14 +79,14 @@ echo 'graph TD
 +-+-+
   |
   |
-  |
-+-v-+
+  v
++---+
 | B |
 +-+-+
   |
   |
-  |
-+-v-+
+  v
++---+
 | C |
 +---+
 ```
@@ -174,23 +174,23 @@ EOF
 
           ┌───────┐
           │ Start │
-          └───┼───┘
+          └───┬───┘
               │
               │
-              │
-        /─────▼────\
+              ▼
+        /──────────\
         │ Decision │
-        \─────┼────/
+        \─────┬────/
       yes     │        no
-      ┼───────┼────────┼
-      │                │
-┌─────▼─────┐    ┌─────▼─────┐
+      ┌───────┴────────┐
+      ▼                ▼
+┌───────────┐    ┌───────────┐
 │ Process A │    │ Process B │
-└─────┼─────┘    └─────┼─────┘
+└─────┬─────┘    └─────┬─────┘
       │                │
-      ┼───────┼────────┼
-              │
-           ┌──▼──┐
+      └───────┬────────┘
+              ▼
+           ┌─────┐
            │ End │
            └─────┘
 ```
@@ -288,8 +288,8 @@ Multi-phase compiler pipeline. Each phase transforms one representation to the n
   7. expand_compound_nodes()
      └─ position member nodes inside compounds
 
-  8. route_edges()               ← orthogonal waypoints
-     └─ waypoints through layer gaps via dummy positions
+  8. route_edges()               ← A* pathfinding
+     └─ waypoints via A* on character grid, avoiding node obstacles
 
 
   ASCII Render Phases:
@@ -298,8 +298,10 @@ Multi-phase compiler pipeline. Each phase transforms one representation to the n
   2. Paint compound/subgraph borders
   3. Paint node boxes (shape-aware: ┌┐└┘ ╭╮╰╯ /\ ())
   4. Paint edges (solid ─│, dotted ╌╎, thick ═║)
-  5. Paint arrowheads (► ◄ ▼ ▲) + edge labels
-  6. Junction merging (Arms OR: ─ + │ = ┼)
+     - Smart arm merging at waypoints (only add actual connection arms)
+     - Interior segments use standard line chars
+  5. Paint arrowheads (► ◄ ▼ ▲) outside boxes + edge labels
+  6. Paint exit stubs (┬ ┴ ├ ┤) on source node borders
   7. Direction flip (BT→vertical, RL→horizontal)
 ```
 
@@ -318,6 +320,7 @@ mermaid_ascii/                        # Python (library, no CLI)
 ├── layout/
 │   ├── engine.py                     # full_layout() convenience API
 │   ├── graph.py                      # GraphIR: networkx DiGraph wrapper
+│   ├── pathfinder.py                 # A* pathfinding for edge routing
 │   ├── sugiyama.py                   # Sugiyama algorithm (8 phases)
 │   └── types.py                      # LayoutNode, LayoutResult, RoutedEdge, Point
 └── renderers/
@@ -433,7 +436,9 @@ Node painting:
 Edge painting:
   - Line chars: solid ─│, dotted ╌╎, thick ═║
   - Arrow chars: ► ◄ ▼ ▲ (Unicode), > < v ^ (ASCII)
-  - Junction merging: Arms OR (─ + │ = ┼)
+  - Arrows placed OUTSIDE boxes (one cell away from box border)
+  - Smart arm merging at waypoints (only actual connection directions)
+  - Exit stubs: ┬/┴/├/┤ on source node borders (not ┼)
   - Label placed at midpoint waypoint, one row above
 
 Direction transforms:
@@ -499,6 +504,7 @@ parsers/base.py                 parsers/base.rs                     —
 parsers/flowchart.py            parsers/flowchart.rs                —
 layout/engine.py                layout/mod.rs                       —
 layout/graph.py                 layout/graph.rs                     networkx / petgraph
+layout/pathfinder.py            layout/pathfinder.rs                —
 layout/sugiyama.py              layout/sugiyama.rs                  networkx / petgraph
 layout/types.py                 layout/types.rs                     —
 renderers/base.py               renderers/mod.rs                    —
@@ -546,7 +552,7 @@ MIT
 ├──────────────┼──────────────────────┼────────────────────┼────────────────────┼────────────────────────┤
 │ Crossing Min │ Barycenter 24-pass   │ None               │ None               │ Barycenter (via Dagre) │
 ├──────────────┼──────────────────────┼────────────────────┼────────────────────┼────────────────────────┤
-│ Edge Routing │ Orthogonal waypoints │ A* pathfinding     │ A* pathfinding     │ Spline curves          │
+│ Edge Routing │ A* pathfinding       │ A* pathfinding     │ A* pathfinding     │ Spline curves          │
 ├──────────────┼──────────────────────┼────────────────────┼────────────────────┼────────────────────────┤
 │ Node Shapes  │ 4                    │ 1 (rect only)      │ 13                 │ Many                   │
 ├──────────────┼──────────────────────┼────────────────────┼────────────────────┼────────────────────────┤
