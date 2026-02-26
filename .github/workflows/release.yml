@@ -20,11 +20,14 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            archive: mermaid-ascii-linux-x86_64.tar.gz
+            artifact: mermaid-ascii-linux-x86_64
+            binary: mermaid-ascii
           - target: aarch64-unknown-linux-gnu
-            archive: mermaid-ascii-linux-aarch64.tar.gz
+            artifact: mermaid-ascii-linux-aarch64
+            binary: mermaid-ascii
           - target: x86_64-pc-windows-gnu
-            archive: mermaid-ascii-windows-x86_64.zip
+            artifact: mermaid-ascii-windows-x86_64.exe
+            binary: mermaid-ascii.exe
 
     steps:
       - name: Checkout
@@ -40,19 +43,14 @@ jobs:
             --cache-to type=gha,mode=max \
             --output type=local,dest=./out .
 
-      - name: Package (tar.gz)
-        if: "!contains(matrix.archive, '.zip')"
-        run: tar czf ${{ matrix.archive }} -C out .
-
-      - name: Package (zip)
-        if: contains(matrix.archive, '.zip')
-        run: cd out && zip -r ../${{ matrix.archive }} .
+      - name: Rename binary
+        run: mv out/${{ matrix.binary }} ${{ matrix.artifact }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
 
   build-wasm:
     if: >

@@ -107,28 +107,38 @@ graph TD
 				<div
 					class="bg-panel border-bdr flex h-9 shrink-0 items-center justify-between border-b px-4 text-[13px] font-semibold text-[#8b949e]"
 				>
-					ASCII Output
 					<div class="flex gap-1.5">
 						<button
-							id="copy-btn"
-							onclick="copyOutput()"
-							class="bg-ctrl border-bdr hover:bg-bdr cursor-pointer rounded-md border px-3 py-1 text-xs text-[#c9d1d9] transition-colors"
+							id="mode-ascii"
+							onclick="setMode('ascii')"
+							class="bg-hi cursor-pointer rounded-md border border-transparent px-3 py-1 text-xs text-white transition-colors"
 						>
-							Copy
+							ASCII
 						</button>
 						<button
-							id="svg-btn"
-							onclick="saveSvg()"
+							id="mode-svg"
+							onclick="setMode('svg')"
 							class="bg-ctrl border-bdr hover:bg-bdr cursor-pointer rounded-md border px-3 py-1 text-xs text-[#c9d1d9] transition-colors"
 						>
 							SVG
 						</button>
 					</div>
+					<button
+						id="action-btn"
+						onclick="doAction()"
+						class="bg-ctrl border-bdr hover:bg-bdr cursor-pointer rounded-md border px-3 py-1 text-xs text-[#c9d1d9] transition-colors"
+					>
+						Copy
+					</button>
 				</div>
 				<pre
 					id="output"
 					class="bg-bg m-0 min-h-0 flex-1 overflow-auto p-4 font-mono text-sm leading-snug whitespace-pre"
 				></pre>
+				<div
+					id="svg-output"
+					class="bg-bg hidden min-h-0 flex-1 overflow-auto p-4"
+				></div>
 			</div>
 		</div>
 
@@ -138,13 +148,22 @@ graph TD
 			const $ = (id) => document.getElementById(id);
 			const input = $('input'),
 				output = $('output'),
+				svgOutput = $('svg-output'),
 				status = $('status');
 			const padding = $('padding'),
 				unicode = $('unicode');
 			const left = $('left'),
 				right = $('right'),
 				divider = $('divider');
-			let ready = false;
+			const actionBtn = $('action-btn'),
+				modeAscii = $('mode-ascii'),
+				modeSvg = $('mode-svg');
+			let ready = false,
+				mode = 'ascii',
+				lastSvg = '';
+
+			const activeBtn = 'bg-hi cursor-pointer rounded-md border border-transparent px-3 py-1 text-xs text-white transition-colors';
+			const inactiveBtn = 'bg-ctrl border-bdr hover:bg-bdr cursor-pointer rounded-md border px-3 py-1 text-xs text-[#c9d1d9] transition-colors';
 
 			async function load() {
 				try {
@@ -165,15 +184,71 @@ graph TD
 				const src = input.value.trim();
 				if (!src) {
 					output.textContent = '';
+					svgOutput.innerHTML = '';
+					lastSvg = '';
 					return;
 				}
 				try {
-					output.textContent = renderWithOptions(src, unicode.checked, +padding.value || 1, '');
-					output.classList.remove('text-err');
+					if (mode === 'ascii') {
+						output.textContent = renderWithOptions(src, unicode.checked, +padding.value || 1, '');
+						output.classList.remove('text-err');
+					} else {
+						lastSvg = renderSvg(src, +padding.value || 1, '');
+						svgOutput.innerHTML = lastSvg;
+						svgOutput.classList.remove('text-err');
+					}
 				} catch (e) {
-					output.textContent = e.message || String(e);
-					output.classList.add('text-err');
+					const msg = e.message || String(e);
+					if (mode === 'ascii') {
+						output.textContent = msg;
+						output.classList.add('text-err');
+					} else {
+						svgOutput.innerHTML = `<span class="text-err">${msg}</span>`;
+					}
 				}
+			}
+
+			window.setMode = (m) => {
+				mode = m;
+				if (m === 'ascii') {
+					modeAscii.className = activeBtn;
+					modeSvg.className = inactiveBtn;
+					output.classList.remove('hidden');
+					svgOutput.classList.add('hidden');
+					actionBtn.textContent = 'Copy';
+				} else {
+					modeSvg.className = activeBtn;
+					modeAscii.className = inactiveBtn;
+					output.classList.add('hidden');
+					svgOutput.classList.remove('hidden');
+					actionBtn.textContent = 'Download';
+				}
+				doRender();
+			};
+
+			window.doAction = () => {
+				if (mode === 'ascii') {
+					if (!output.textContent) return;
+					navigator.clipboard.writeText(output.textContent).then(() => flash(actionBtn, 'Copied!'));
+				} else {
+					if (!lastSvg) return;
+					const a = document.createElement('a');
+					a.href = URL.createObjectURL(new Blob([lastSvg], { type: 'image/svg+xml' }));
+					a.download = 'output.svg';
+					a.click();
+					URL.revokeObjectURL(a.href);
+					flash(actionBtn, 'Saved!');
+				}
+			};
+
+			function flash(btn, text) {
+				const orig = btn.textContent;
+				btn.textContent = text;
+				btn.classList.add('bg-ok', 'border-okb', 'text-white');
+				setTimeout(() => {
+					btn.textContent = orig;
+					btn.classList.remove('bg-ok', 'border-okb', 'text-white');
+				}, 1500);
 			}
 
 			let timer;
@@ -204,40 +279,6 @@ graph TD
 				divider.classList.replace('bg-hi', 'bg-bdr');
 				document.body.style.cssText = '';
 			});
-
-			function flash(btn, text) {
-				const orig = btn.textContent;
-				btn.textContent = text;
-				btn.classList.add('bg-ok', 'border-okb', 'text-white');
-				setTimeout(() => {
-					btn.textContent = orig;
-					btn.classList.remove('bg-ok', 'border-okb', 'text-white');
-				}, 1500);
-			}
-
-			window.copyOutput = () => {
-				if (output.textContent)
-					navigator.clipboard
-						.writeText(output.textContent)
-						.then(() => flash($('copy-btn'), 'Copied!'));
-			};
-			window.saveSvg = () => {
-				if (!ready) return;
-				const src = input.value.trim();
-				if (!src) return;
-				try {
-					const a = document.createElement('a');
-					a.href = URL.createObjectURL(
-						new Blob([renderSvg(src, +padding.value || 1, '')], { type: 'image/svg+xml' })
-					);
-					a.download = 'output.svg';
-					a.click();
-					URL.revokeObjectURL(a.href);
-					flash($('svg-btn'), 'Saved!');
-				} catch (e) {
-					console.error('SVG render failed:', e);
-				}
-			};
 
 			load();
 		</script>

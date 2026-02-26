@@ -1,6 +1,6 @@
 //! Integration tests for the mermaid-ascii binary.
 //!
-//! These tests run the compiled binary and verify output against golden .expect files.
+//! These tests run the compiled binary and verify output against golden .expect.txt / .expect.svg files.
 //! Ported from the former Python tests/e2e/test_rust_binary.py.
 
 use std::fs;
@@ -69,7 +69,7 @@ fn find_example_pairs() -> Vec<(String, PathBuf, PathBuf)> {
             {
                 let stem = path.file_name().unwrap().to_string_lossy();
                 let name = stem.trim_end_matches(".mm.md").to_string();
-                let expect_path = dir.join(format!("{}.expect", name));
+                let expect_path = dir.join(format!("{}.expect.txt", name));
                 if expect_path.exists() {
                     pairs.push((name, path, expect_path));
                 }

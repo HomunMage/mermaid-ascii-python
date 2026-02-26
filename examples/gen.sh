@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Generate output for all examples and verify against .expect files.
+# Generate output for all examples and verify against .expect.txt files.
 # Usage: bash examples/gen.sh          # generate only
-#        bash examples/gen.sh --check  # generate + verify against .expect
+#        bash examples/gen.sh --check  # generate + verify against .expect.txt
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -32,13 +32,13 @@ find examples -name '*.out.txt' | sort | while read -r f; do
     echo "  $f"
 done
 
-# Verify against .expect files
+# Verify against .expect.txt files
 if $CHECK; then
     echo ""
-    echo "Checking against .expect files..."
+    echo "Checking against .expect.txt files..."
     FAIL=0
-    for expect in examples/*.expect; do
-        base="${expect%.expect}"
+    for expect in examples/*.expect.txt; do
+        base="${expect%.expect.txt}"
         out="${base}.out.txt"
         if [[ ! -f "$out" ]]; then
             echo "  MISSING: $out (no output generated for $expect)"
@@ -55,9 +55,9 @@ if $CHECK; then
     done
     if [[ $FAIL -ne 0 ]]; then
         echo ""
-        echo "FAILED: some outputs differ from .expect files"
+        echo "FAILED: some outputs differ from .expect.txt files"
         exit 1
     fi
     echo ""
-    echo "All outputs match .expect files."
+    echo "All outputs match .expect.txt files."
 fi
