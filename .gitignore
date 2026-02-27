@@ -32,5 +32,6 @@ target/
 pkg/
 _site/*.wasm
 _site/*.js
+_site/version.txt
 !_site/index.html
 *.svg

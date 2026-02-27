@@ -1,0 +1,36 @@
+// config.hom — Rendering configuration for the mermaid-ascii pipeline
+//
+// Structs:      RenderConfig
+// Constructors: config_default, config_new
+
+use std
+
+// ── RenderConfig ───────────────────────────────────────────────────────────────
+// unicode:           use Unicode box-drawing chars (true) or plain ASCII (false)
+// padding:           horizontal padding cells inside each node box
+// direction_override: if set, overrides the flowchart's own direction declaration
+//                    (one of "LR", "RL", "TD", "BT", or none)
+
+RenderConfig := struct {
+  unicode: bool,
+  padding: int,
+  direction_override: str   // optional: none means use the graph's own direction
+}
+
+// Create a RenderConfig with default values (unicode on, padding=1, no override).
+config_default := () -> RenderConfig {
+  RenderConfig {
+    unicode: true,
+    padding: 1,
+    direction_override: none
+  }
+}
+
+// Create a RenderConfig with explicit values.
+config_new := (unicode: bool, padding: int, direction_override: str) -> RenderConfig {
+  RenderConfig {
+    unicode: unicode,
+    padding: padding,
+    direction_override: direction_override
+  }
+}

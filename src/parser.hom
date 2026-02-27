@@ -1,0 +1,649 @@
+// parser.hom — Mermaid flowchart recursive descent parser
+//
+// Part 1: Cursor struct and tokenizer helper functions.
+// Part 2: Edge chain, statement, subgraph, and graph parsing.
+//
+// Structs:   Cursor, ShapeParse, EdgePattern, EdgeChainSeg, EdgeStmtResult
+// Functions: cursor_new, cursor_eof, cursor_peek, cursor_consume,
+//            cursor_skip_ws, cursor_skip_ws_and_newlines,
+//            cursor_consume_newline,
+//            cursor_match_node_id, cursor_match_direction,
+//            cursor_parse_quoted_string, cursor_parse_node_label,
+//            cursor_parse_node_shape, cursor_parse_node_ref,
+//            edge_patterns, cursor_parse_edge_connector,
+//            cursor_try_parse_edge_label, cursor_parse_edge_chain,
+//            upsert_node, cursor_try_parse_edge_stmt,
+//            cursor_try_parse_node_stmt,
+//            cursor_at_end_keyword, cursor_parse_subgraph_label,
+//            cursor_try_parse_subgraph_direction,
+//            cursor_parse_statement_into, cursor_parse_subgraph_block,
+//            cursor_try_parse_header, cursor_parse_graph, parse_flowchart
+
+use std
+use re
+use types
+
+// ── Cursor ────────────────────────────────────────────────────────────────────
+// Stateful parser cursor: a string + current byte position.
+
+Cursor := struct {
+  src: str,
+  pos: int
+}
+
+// Create a new cursor at position 0.
+cursor_new := (src: str) -> Cursor {
+  Cursor { src: src, pos: 0 }
+}
+
+// Return true when the cursor has reached or passed the end of input.
+cursor_eof := (c: Cursor) -> bool {
+  c.pos >= len(c.src)
+}
+
+// Return true if the input at the current position starts with the string s.
+cursor_peek := (c: Cursor, s: str) -> bool {
+  substr(c.src, c.pos, c.pos + len(s)) == s
+}
+
+// If the input at the current position starts with s, advance past it and
+// return true.  Otherwise leave the position unchanged and return false.
+cursor_consume := (c: Cursor, s: str) -> bool {
+  if (cursor_peek(c, s)) do {
+    c.pos := c.pos + len(s)
+    true
+  } else {
+    false
+  }
+}
+
+// ── Whitespace / comment skipping ─────────────────────────────────────────────
+
+// Skip horizontal whitespace (spaces, tabs) and %% line comments.
+// Does NOT skip newlines.
+cursor_skip_ws := (c: Cursor) -> _ {
+  done := false
+  while (!done) do {
+    m1, _, e1 := re_match("[ \\t]+", c.src, c.pos)
+    if (m1) do {
+      c.pos := e1
+    } else {
+      m2, _, e2 := re_match("%%[^\\n]*", c.src, c.pos)
+      if (m2) do {
+        c.pos := e2
+      } else {
+        done := true
+      }
+    }
+  }
+}
+
+// Skip horizontal whitespace, %% line comments, AND newlines (\r\n, \n, \r).
+cursor_skip_ws_and_newlines := (c: Cursor) -> _ {
+  done := false
+  while (!done) do {
+    m1, _, e1 := re_match("[ \\t]+", c.src, c.pos)
+    if (m1) do {
+      c.pos := e1
+    } else {
+      m2, _, e2 := re_match("%%[^\\n]*", c.src, c.pos)
+      if (m2) do {
+        c.pos := e2
+      } else {
+        m3, _, e3 := re_match("\\r\\n|\\n|\\r", c.src, c.pos)
+        if (m3) do {
+          c.pos := e3
+        } else {
+          done := true
+        }
+      }
+    }
+  }
+}
+
+// ── Identifier and keyword matching ──────────────────────────────────────────
+
+// Try to match a node identifier [a-zA-Z_][a-zA-Z0-9_-]* at the current
+// position.  On success, advances the cursor and returns the matched text.
+// Returns none when no identifier is present.
+cursor_match_node_id := (c: Cursor) -> str {
+  matched, text, end_pos := re_match("[a-zA-Z_][a-zA-Z0-9_-]*", c.src, c.pos)
+  if (matched) do {
+    c.pos := end_pos
+    text
+  } else {
+    none
+  }
+}
+
+// Try to match a direction keyword (TD, TB, LR, RL, BT) at the current
+// position.  TB is normalised to TD.  Defaults to Direction.TD if no match.
+cursor_match_direction := (c: Cursor) -> Direction {
+  matched, text, end_pos := re_match("TD|TB|LR|RL|BT", c.src, c.pos)
+  if (matched) do {
+    c.pos := end_pos
+    match text {
+      "TD" => Direction.TD
+      "TB" => Direction.TD
+      "LR" => Direction.LR
+      "RL" => Direction.RL
+      "BT" => Direction.BT
+      _    => Direction.TD
+    }
+  } else {
+    Direction.TD
+  }
+}
+
+// ── Quoted-string parsing ─────────────────────────────────────────────────────
+
+// Parse a double-quoted string at the current position.
+// Handles escape sequences: \n → newline, \" → quote, \\ → backslash.
+// Any other \X → X (pass-through).
+// Caller must ensure src[pos] == '"'.
+cursor_parse_quoted_string := (c: Cursor) -> str {
+  c.pos := c.pos + 1
+  buf  := @[]
+  done := false
+  while (!done && c.pos < len(c.src)) do {
+    ch := char_at(c.src, c.pos)
+    if (ch == "\"") do {
+      c.pos := c.pos + 1
+      done  := true
+    } else {
+      if (ch == "\\" && c.pos + 1 < len(c.src)) do {
+        nxt    := char_at(c.src, c.pos + 1)
+        pushed := match nxt {
+          "n"  => "\n"
+          "\"" => "\""
+          "\\" => "\\"
+          _    => nxt
+        }
+        push(buf, pushed)
+        c.pos := c.pos + 2
+      } else {
+        push(buf, ch)
+        c.pos := c.pos + 1
+      }
+    }
+  }
+  join(buf, "")
+}
+
+// ── Node label parsing ────────────────────────────────────────────────────────
+
+// Parse a node label at the current position.
+// A label is either a quoted string or a bare sequence of characters that
+// are not ], ), }, or newline.  Leading whitespace is skipped first.
+cursor_parse_node_label := (c: Cursor) -> str {
+  cursor_skip_ws(c)
+  if (c.pos < len(c.src) && char_at(c.src, c.pos) == "\"") do {
+    cursor_parse_quoted_string(c)
+  } else {
+    // Bare label: anything except ], ), }, newline
+    matched, text, end_pos := re_match("[^\\]\\)\\}\\n]+", c.src, c.pos)
+    if (matched) do {
+      c.pos := end_pos
+      trim(text)
+    } else {
+      ""
+    }
+  }
+}
+
+// ── Node shape parsing ────────────────────────────────────────────────────────
+
+// Carrier for the result of parsing a node shape bracket + label.
+ShapeParse := struct {
+  shape: NodeShape,
+  label: str
+}
+
+// Try to parse a node shape bracket and its enclosed label at the current
+// position.  Returns a ShapeParse on success, or none if no bracket is present.
+//
+// Precedence (longest bracket first):
+//   (( … ))  → Circle
+//   ( … )    → Rounded
+//   { … }    → Diamond
+//   [ … ]    → Rectangle
+cursor_parse_node_shape := (c: Cursor) -> ShapeParse {
+  if (cursor_peek(c, "((")) do {
+    c.pos := c.pos + 2
+    label := cursor_parse_node_label(c)
+    cursor_consume(c, "))")
+    ShapeParse { shape: NodeShape.Circle, label: label }
+  } else {
+    if (cursor_peek(c, "(")) do {
+      c.pos := c.pos + 1
+      label := cursor_parse_node_label(c)
+      cursor_consume(c, ")")
+      ShapeParse { shape: NodeShape.Rounded, label: label }
+    } else {
+      if (cursor_peek(c, "{")) do {
+        c.pos := c.pos + 1
+        label := cursor_parse_node_label(c)
+        cursor_consume(c, "}")
+        ShapeParse { shape: NodeShape.Diamond, label: label }
+      } else {
+        if (cursor_peek(c, "[")) do {
+          c.pos := c.pos + 1
+          label := cursor_parse_node_label(c)
+          cursor_consume(c, "]")
+          ShapeParse { shape: NodeShape.Rectangle, label: label }
+        } else {
+          none
+        }
+      }
+    }
+  }
+}
+
+// ── Node reference parsing ────────────────────────────────────────────────────
+
+// Parse a node reference: an identifier optionally followed by a shape bracket.
+// Skips leading whitespace.  Returns a Node on success, or none if no
+// identifier is present.
+//
+// A bare id (no bracket) produces a node whose label equals its id and whose
+// shape defaults to Rectangle.
+cursor_parse_node_ref := (c: Cursor) -> Node {
+  cursor_skip_ws(c)
+  node_id := cursor_match_node_id(c)
+  if (node_id == none) do {
+    none
+  } else {
+    sp := cursor_parse_node_shape(c)
+    if (sp != none) do {
+      node_new(node_id, sp.label, sp.shape)
+    } else {
+      node_bare(node_id)
+    }
+  }
+}
+
+// ── Edge connector patterns ───────────────────────────────────────────────────
+
+// A single edge token paired with its EdgeType.
+EdgePattern := struct {
+  token: str,
+  etype: EdgeType
+}
+
+// All supported edge connector tokens, ordered longest-match first so that
+// e.g. "<-->" is tried before "-->".
+edge_patterns := () -> @[] {
+  @[
+    EdgePattern { token: "<-.->", etype: EdgeType.BidirDotted },
+    EdgePattern { token: "<==>",  etype: EdgeType.BidirThick  },
+    EdgePattern { token: "<-->",  etype: EdgeType.BidirArrow  },
+    EdgePattern { token: "-.->",  etype: EdgeType.DottedArrow },
+    EdgePattern { token: "==>",   etype: EdgeType.ThickArrow  },
+    EdgePattern { token: "-->",   etype: EdgeType.Arrow       },
+    EdgePattern { token: "-.-",   etype: EdgeType.DottedLine  },
+    EdgePattern { token: "===",   etype: EdgeType.ThickLine   },
+    EdgePattern { token: "---",   etype: EdgeType.Line        }
+  ]
+}
+
+// Try to parse an edge connector at the current position (after skipping
+// horizontal whitespace).  Returns the matching EdgeType, or none if no
+// known connector is found.  The cursor is advanced past the matched token.
+cursor_parse_edge_connector := (c: Cursor) -> EdgeType {
+  cursor_skip_ws(c)
+  patterns := edge_patterns()
+  result   := none
+  for ep in patterns do {
+    if (result == none && cursor_peek(c, ep.token)) do {
+      c.pos  := c.pos + len(ep.token)
+      result := ep.etype
+    }
+  }
+  result
+}
+
+// ── Newline consumption ────────────────────────────────────────────────────────
+
+// Try to consume a single newline (\r\n, \n, or \r) at the current position.
+// Returns true if consumed, false otherwise.
+cursor_consume_newline := (c: Cursor) -> bool {
+  matched, _, end_pos := re_match("\\r\\n|\\n|\\r", c.src, c.pos)
+  if (matched) do {
+    c.pos := end_pos
+    true
+  } else {
+    false
+  }
+}
+
+// ── Edge label ────────────────────────────────────────────────────────────────
+
+// Try to parse an optional edge label of the form |text| at the current
+// position.  Skips leading whitespace, then looks for |.  Returns the
+// trimmed label text (possibly ""), or none if no | is found.
+cursor_try_parse_edge_label := (c: Cursor) -> str {
+  cursor_skip_ws(c)
+  if (!cursor_consume(c, "|")) do {
+    none
+  } else {
+    matched, text, end_pos := re_match("[^|\\n]+", c.src, c.pos)
+    if (matched) do {
+      c.pos := end_pos
+    }
+    cursor_consume(c, "|")
+    if (matched) do {
+      trim(text)
+    } else {
+      ""
+    }
+  }
+}
+
+// ── Edge chain ────────────────────────────────────────────────────────────────
+
+// A single segment in a chained edge statement: connector type, optional
+// label, and the target node reference.
+EdgeChainSeg := struct {
+  etype:  EdgeType,
+  label:  str,     // none if no label
+  target: Node
+}
+
+// Parse zero or more chained edge segments of the form:
+//   (connector [|label|] node_ref)*
+// Backtracks on failure; returns empty list if nothing matches.
+cursor_parse_edge_chain := (c: Cursor) -> @[] {
+  segs := @[]
+  done := false
+  while (!done) do {
+    saved := c.pos
+    etype := cursor_parse_edge_connector(c)
+    if (etype == none) do {
+      c.pos := saved
+      done  := true
+    } else {
+      lbl    := cursor_try_parse_edge_label(c)
+      target := cursor_parse_node_ref(c)
+      if (target == none) do {
+        c.pos := saved
+        done  := true
+      } else {
+        seg := EdgeChainSeg { etype: etype, label: lbl, target: target }
+        push(segs, seg)
+      }
+    }
+  }
+  segs
+}
+
+// ── Edge statement ────────────────────────────────────────────────────────────
+
+// Carrier for the result of try_parse_edge_stmt: the collected nodes and edges.
+EdgeStmtResult := struct {
+  nodes: @[],
+  edges: @[]
+}
+
+// Insert node into list only when no node with the same id already exists
+// (first-definition-wins semantics).
+upsert_node := (nodes: @[], node: Node) -> _ {
+  matches := nodes | filter((n) -> { n.id == node.id })
+  if (len(matches) == 0) do {
+    push(nodes, node)
+  }
+}
+
+// Try to parse a full edge statement: source node_ref + one or more chain
+// segments.  Returns an EdgeStmtResult on success, or none on failure (cursor
+// is restored to saved position).
+cursor_try_parse_edge_stmt := (c: Cursor) -> EdgeStmtResult {
+  saved  := c.pos
+  source := cursor_parse_node_ref(c)
+  if (source == none) do {
+    c.pos := saved
+    none
+  } else {
+    segs := cursor_parse_edge_chain(c)
+    if (len(segs) == 0) do {
+      c.pos := saved
+      none
+    } else {
+      res_nodes := @[]
+      res_edges := @[]
+      push(res_nodes, source)
+      prev_id   := source.id
+      for seg in segs do {
+        e       := edge_new(prev_id, seg.target.id, seg.etype)
+        e.label := seg.label
+        prev_id := seg.target.id
+        push(res_nodes, seg.target)
+        push(res_edges, e)
+      }
+      EdgeStmtResult { nodes: res_nodes, edges: res_edges }
+    }
+  }
+}
+
+// ── Node statement ────────────────────────────────────────────────────────────
+
+// Try to parse a standalone node statement (a node reference with no following
+// edge connector).  Returns the Node on success, or none on failure.
+cursor_try_parse_node_stmt := (c: Cursor) -> Node {
+  saved := c.pos
+  node  := cursor_parse_node_ref(c)
+  if (node == none) do {
+    c.pos := saved
+    none
+  } else {
+    node
+  }
+}
+
+// ── Subgraph parsing ──────────────────────────────────────────────────────────
+
+// Return true if the cursor is positioned at the "end" keyword, i.e., "end"
+// is not immediately followed by an alphanumeric, underscore, or hyphen.
+cursor_at_end_keyword := (c: Cursor) -> bool {
+  if (!cursor_peek(c, "end")) do {
+    false
+  } else {
+    after := c.pos + 3
+    if (after >= len(c.src)) do {
+      true
+    } else {
+      m, _, _ := re_match("[a-zA-Z0-9_-]", c.src, after)
+      !m
+    }
+  }
+}
+
+// Parse a subgraph label: either a quoted string or a bare line (everything
+// up to the next newline), trimmed of surrounding whitespace.
+cursor_parse_subgraph_label := (c: Cursor) -> str {
+  cursor_skip_ws(c)
+  if (c.pos < len(c.src) && char_at(c.src, c.pos) == "\"") do {
+    cursor_parse_quoted_string(c)
+  } else {
+    matched, text, end_pos := re_match("[^\\n]+", c.src, c.pos)
+    if (matched) do {
+      c.pos := end_pos
+      trim(text)
+    } else {
+      ""
+    }
+  }
+}
+
+// Try to parse a "direction XY" line inside a subgraph body.
+// Returns the Direction on success, or none if "direction" keyword not found.
+cursor_try_parse_subgraph_direction := (c: Cursor) -> Direction {
+  saved := c.pos
+  cursor_skip_ws(c)
+  if (!cursor_consume(c, "direction")) do {
+    c.pos := saved
+    none
+  } else {
+    cursor_skip_ws(c)
+    d := cursor_match_direction(c)
+    cursor_skip_ws(c)
+    cursor_consume_newline(c)
+    d
+  }
+}
+
+// ── Statement dispatcher ──────────────────────────────────────────────────────
+
+// Parse one statement into the provided node/edge/subgraph mutable lists.
+// Tries subgraph first, then edge statement, then bare node statement.
+// Returns true if a statement was consumed, false otherwise.
+// Note: cursor_parse_subgraph_block is defined below (mutual recursion is
+// fine at the Rust level since both compile to module-level fns).
+cursor_parse_statement_into := (c: Cursor, nodes: @[], edges: @[], subgraphs: @[]) -> bool {
+  cursor_skip_ws(c)
+  if (cursor_eof(c)) do {
+    false
+  } else {
+    sg := cursor_parse_subgraph_block(c)
+    if (sg != none) do {
+      push(subgraphs, sg)
+      true
+    } else {
+      res := cursor_try_parse_edge_stmt(c)
+      if (res != none) do {
+        for n in res.nodes do {
+          upsert_node(nodes, n)
+        }
+        for e in res.edges do {
+          push(edges, e)
+        }
+        cursor_skip_ws(c)
+        cursor_consume_newline(c)
+        true
+      } else {
+        node := cursor_try_parse_node_stmt(c)
+        if (node != none) do {
+          upsert_node(nodes, node)
+          cursor_skip_ws(c)
+          cursor_consume_newline(c)
+          true
+        } else {
+          false
+        }
+      }
+    }
+  }
+}
+
+// Parse a subgraph block starting with the "subgraph" keyword.
+// Returns a Subgraph on success, or none if no subgraph is found.
+// Recursive: calls cursor_parse_statement_into for inner statements.
+cursor_parse_subgraph_block := (c: Cursor) -> Subgraph {
+  saved := c.pos
+  cursor_skip_ws(c)
+  if (!cursor_consume(c, "subgraph")) do {
+    c.pos := saved
+    none
+  } else {
+    // Guard: "subgraph" must not be immediately followed by an identifier char
+    // (e.g., "subgraphFoo" is an identifier, not the subgraph keyword).
+    id_follows := false
+    if (c.pos < len(c.src)) do {
+      m, _, _ := re_match("[a-zA-Z0-9_-]", c.src, c.pos)
+      id_follows := m
+    }
+    if (id_follows) do {
+      c.pos := saved
+      none
+    } else {
+      name := cursor_parse_subgraph_label(c)
+      cursor_skip_ws(c)
+      cursor_consume_newline(c)
+      sg  := subgraph_new(name)
+      dir := cursor_try_parse_subgraph_direction(c)
+      if (dir != none) do {
+        sg.direction := dir
+      }
+      done := false
+      while (!cursor_eof(c) && !done) do {
+        cursor_skip_ws(c)
+        if (cursor_at_end_keyword(c)) do {
+          c.pos := c.pos + 3
+          cursor_skip_ws(c)
+          cursor_consume_newline(c)
+          done := true
+        } else {
+          ok := cursor_parse_statement_into(c, sg.nodes, sg.edges, sg.subgraphs)
+          if (!ok) do {
+            did_nl := cursor_consume_newline(c)
+            if (!did_nl) do {
+              c.pos := c.pos + 1
+            }
+          }
+        }
+      }
+      sg
+    }
+  }
+}
+
+// ── Header parsing ────────────────────────────────────────────────────────────
+
+// Try to parse the optional "flowchart DIR" or "graph DIR" header line.
+// Returns the Direction on success, or none if no header is found.
+cursor_try_parse_header := (c: Cursor) -> Direction {
+  saved := c.pos
+  cursor_skip_ws_and_newlines(c)
+  ok := cursor_consume(c, "flowchart")
+  if (!ok) do {
+    ok := cursor_consume(c, "graph")
+  }
+  if (!ok) do {
+    c.pos := saved
+    none
+  } else {
+    cursor_skip_ws(c)
+    d := cursor_match_direction(c)
+    cursor_skip_ws(c)
+    // consume optional trailing %% comment
+    mc, _, ec := re_match("%%[^\\n]*", c.src, c.pos)
+    if (mc) do {
+      c.pos := ec
+    }
+    cursor_skip_ws(c)
+    cursor_consume_newline(c)
+    d
+  }
+}
+
+// ── Graph parsing ─────────────────────────────────────────────────────────────
+
+// Parse the entire input as a flowchart/graph diagram.
+// Handles the optional header line, then processes statements until EOF.
+cursor_parse_graph := (c: Cursor) -> Graph {
+  g   := graph_new()
+  dir := cursor_try_parse_header(c)
+  if (dir != none) do {
+    g.direction := dir
+  }
+  while (!cursor_eof(c)) do {
+    cursor_skip_ws(c)
+    if (!cursor_eof(c)) do {
+      if (!cursor_consume_newline(c)) do {
+        ok := cursor_parse_statement_into(c, g.nodes, g.edges, g.subgraphs)
+        if (!ok) do {
+          c.pos := c.pos + 1
+        }
+      }
+    }
+  }
+  g
+}
+
+// ── Top-level API ─────────────────────────────────────────────────────────────
+
+// Parse a Mermaid flowchart DSL string and return the Graph AST.
+// This is the main public entry point for the parser module.
+parse_flowchart := (src: str) -> Graph {
+  c := cursor_new(src)
+  cursor_parse_graph(c)
+}

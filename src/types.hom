@@ -1,0 +1,119 @@
+// types.hom — AST data structures for Mermaid flowchart syntax
+//
+// Enums:   Direction, NodeShape, EdgeType
+// Structs: Attr, Node, Edge, Subgraph, Graph
+// Constructors: node_new, node_bare, edge_new, subgraph_new, graph_new
+
+// ── Direction ─────────────────────────────────────────────────────────────────
+
+Direction := enum { LR, RL, TD, BT }
+
+direction_default := () -> Direction { Direction.TD }
+
+// ── NodeShape ─────────────────────────────────────────────────────────────────
+// Rectangle  id[Label]
+// Rounded    id(Label)
+// Diamond    id{Label}
+// Circle     id((Label))
+
+NodeShape := enum { Rectangle, Rounded, Diamond, Circle }
+
+node_shape_default := () -> NodeShape { NodeShape.Rectangle }
+
+// ── EdgeType ──────────────────────────────────────────────────────────────────
+// Arrow       -->      Line        ---
+// DottedArrow -.->     DottedLine  -.-
+// ThickArrow  ==>      ThickLine   ===
+// BidirArrow  <-->     BidirDotted <-.->    BidirThick  <==>
+
+EdgeType := enum {
+  Arrow,
+  Line,
+  DottedArrow,
+  DottedLine,
+  ThickArrow,
+  ThickLine,
+  BidirArrow,
+  BidirDotted,
+  BidirThick
+}
+
+// ── Attr (key-value metadata attached to nodes/edges) ─────────────────────────
+
+Attr := struct { key: str, value: str }
+
+// ── Node ──────────────────────────────────────────────────────────────────────
+
+Node := struct {
+  id: str,
+  label: str,
+  shape: NodeShape,
+  attrs: @[]
+}
+
+// Create a node with explicit id, label, and shape.
+node_new := (id: str, label: str, shape: NodeShape) -> Node {
+  Node { id: id, label: label, shape: shape, attrs: @[] }
+}
+
+// Create a bare node: id becomes the label, shape defaults to Rectangle.
+node_bare := (id: str) -> Node {
+  Node { id: id, label: id, shape: NodeShape.Rectangle, attrs: @[] }
+}
+
+// ── Edge ──────────────────────────────────────────────────────────────────────
+
+Edge := struct {
+  from_id: str,
+  to_id: str,
+  edge_type: EdgeType,
+  label: str,     // optional: none if no label
+  attrs: @[]
+}
+
+// Create an edge with no label by default.
+edge_new := (from_id: str, to_id: str, edge_type: EdgeType) -> Edge {
+  Edge { from_id: from_id, to_id: to_id, edge_type: edge_type, label: none, attrs: @[] }
+}
+
+// ── Subgraph ──────────────────────────────────────────────────────────────────
+
+Subgraph := struct {
+  name: str,
+  nodes: @[],
+  edges: @[],
+  subgraphs: @[],
+  description: str,    // optional: none if no subtitle
+  direction: Direction  // optional: none means inherit parent direction
+}
+
+// Create an empty named subgraph.
+subgraph_new := (name: str) -> Subgraph {
+  Subgraph {
+    name: name,
+    nodes: @[],
+    edges: @[],
+    subgraphs: @[],
+    description: none,
+    direction: none
+  }
+}
+
+// ── Graph ─────────────────────────────────────────────────────────────────────
+
+Graph := struct {
+  direction: Direction,
+  nodes: @[],
+  edges: @[],
+  subgraphs: @[]
+}
+
+// Create a new empty graph with default TD direction.
+graph_new := () -> Graph {
+  Graph {
+    direction: direction_default(),
+    nodes: @[],
+    edges: @[],
+    subgraphs: @[]
+  }
+}

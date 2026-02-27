@@ -1,0 +1,644 @@
+// layout.hom — Sugiyama-style layered graph layout (Phases 1–4)
+//
+// This module implements Phases 1, 2, 3, and 4 of the 8-phase Sugiyama
+// algorithm:
+//
+//   Phase 1: greedy_fas_ordering + remove_cycles
+//     Computes a linear node ordering using the greedy Feedback Arc Set (FAS)
+//     heuristic, then uses that ordering to identify and reverse back-edges so
+//     the graph becomes a DAG.
+//
+//   Phase 2: assign_layers  (longest-path layer assignment)
+//     Assigns every node a layer index (0-based) such that for every DAG edge
+//     (u → v):  layer[v] >= layer[u] + 1.
+//     Uses simple iterative longest-path propagation.
+//     Returns a LayerAssignment with the layer map, total layer count, and the
+//     reversed-edge set from Phase 1 (needed later to flip edge routing).
+//
+//   Phase 3: insert_dummy_nodes  (break multi-layer edges)
+//     For every edge (src → tgt) that spans more than one layer
+//     (layer[tgt] - layer[src] > 1), replaces it with a chain of unit-step
+//     edges through freshly-created dummy nodes.
+//     Dummy node IDs: "__dummy__<edge_idx>_<step_idx>".
+//     Returns AugmentedGraph { graph, layers, layer_count, dummy_edges }.
+//
+//   Phase 4: minimise_crossings  (barycenter 24-pass sweep)
+//     Groups nodes into their layers (alphabetical within each layer for
+//     determinism), then runs up to 24 forward/backward sweep passes:
+//       - Forward pass: sort each layer by average position of predecessors
+//         in the previous layer (barycenter "incoming").
+//       - Backward pass: sort each layer by average position of successors
+//         in the next layer (barycenter "outgoing").
+//     Stops early if no improvement in crossing count.
+//     Returns OrderingList — a 2D list of node IDs, one StrList per layer.
+//
+// Remaining phases (5–8) are NOT yet implemented in this file.
+//
+// ── Functions (Phase 1) ───────────────────────────────────────────────────────
+//   greedy_fas_ordering(g) -> StrList
+//   remove_cycles(g)       -> (Graph, EdgePairList)
+//
+// ── Functions (Phase 2) ───────────────────────────────────────────────────────
+//   assign_layers(g)       -> LayerAssignment
+//
+// ── Functions (Phase 3) ───────────────────────────────────────────────────────
+//   insert_dummy_nodes(dag, la: LayerAssignment) -> AugmentedGraph
+//
+// ── Functions (Phase 4) ───────────────────────────────────────────────────────
+//   minimise_crossings(aug: AugmentedGraph) -> OrderingList
+//
+// ── Algorithm overview ────────────────────────────────────────────────────────
+//   greedy_fas_ordering:
+//     1. Track in-degree and out-degree for every node in an "active" set.
+//     2. Repeatedly:
+//          a. Remove all sinks (out-degree 0) → prepend to s2 list.
+//          b. Remove all sources (in-degree 0) → append to s1 list.
+//          c. If neither sinks nor sources: pick node with max(out − in),
+//             remove from active, append to s1.
+//     3. Return s1 ++ reversed(s2).
+//
+//   remove_cycles:
+//     1. Compute a linear ordering with greedy_fas_ordering.
+//     2. Build position map (node_id → index in ordering).
+//     3. For each edge (src → tgt):
+//          if src comes after tgt in ordering (or is a self-loop) → reversed.
+//     4. Build new graph: copy all nodes; add edges with back-edges reversed.
+//     5. Return (dag, set_of_reversed_edges).
+//
+// ── Language notes ────────────────────────────────────────────────────────────
+//  (1) All mutable state (DegMap, NodeSet, StrList, EdgePairList, etc.) lives in
+//      dep/layout_state.rs using Rc<RefCell<...>> so .hom's .clone()-based
+//      calling convention does not lose mutations.
+//  (2) Graph functions are wrapped in gw_* (value-based) wrappers also in
+//      dep/layout_state.rs, since graph.rs takes &Graph / &mut Graph but .hom
+//      emits g.clone() which produces Graph by value.
+//  (3) Top-level integer variables compile to Rust `const X: _ = …` which
+//      requires a concrete type.  The four layout constants use explicit int
+//      annotations so they emit `const NODE_PADDING: i32 = 1` etc.
+//  (4) Use 'or' / 'and' / 'not' keywords — '||', '&&', '!' are not lexed.
+//
+// ── Dependencies ──────────────────────────────────────────────────────────────
+//   dep/graph.rs         — Graph struct, graph_* free functions
+//   dep/layout_state.rs  — DegMap, NodeSet, StrList, EdgePairList, PosMap,
+//                          MutableGraph, EdgeInfoList, gw_* wrappers, fas_*
+
+use graph
+use layout_state
+// Language note: importing grid_data (an existing dep .rs file) sets
+// has_rs_dep=true in the homunc sema checker, switching to skip_undef mode
+// so that functions from graph.rs and layout_state.rs are not flagged as
+// undefined.  grid_data.rs is a zero-impact dep (no name clashes).
+use grid_data
+
+
+// ── Layout geometry constants ─────────────────────────────────────────────────
+// Character-grid sizing used across all layout phases.
+// (Additional phases use these when placing nodes and routing edges.)
+//
+// Note: top-level variables compile to Rust `const X: _ = …` which requires a
+// concrete type.  Integer literals infer as i32 from context, which works.
+// If future phases need them as floats, a workaround function wrapper may be
+// needed (see language note 4 in pathfinder.hom).
+
+node_padding := 1
+h_gap        := 4
+v_gap        := 3
+node_height  := 3
+
+
+// ── greedy_fas_ordering ────────────────────────────────────────────────────────
+// Compute a linear node ordering using the greedy Feedback Arc Set heuristic.
+//
+// The ordering minimises the number of "back-edges" (edges that go from a later
+// node to an earlier one), which corresponds to the edges that will be reversed
+// in remove_cycles below.
+//
+// Parameters:
+//   g — the directed graph (Graph from dep/graph.rs)
+//
+// Returns: StrList of all node ids in the computed linear order.
+
+greedy_fas_ordering := (g) -> StrList {
+  all_nodes := gw_nodes(g)
+  active    := node_set_from_str_list(all_nodes)
+  out_deg   := deg_map_new()
+  in_deg    := deg_map_new()
+
+  // Initialise degree maps from the graph.
+  n := str_list_len(all_nodes)
+  i := 0
+  while (i < n) do {
+    nid := str_list_get(all_nodes, i)
+    deg_map_set(out_deg, nid, gw_out_degree(g, nid))
+    deg_map_set(in_deg,  nid, gw_in_degree(g, nid))
+    i := i + 1
+  }
+
+  s1 := str_list_new()   // nodes placed at the front
+  s2 := str_list_new()   // nodes placed at the back (reversed later)
+
+  while (node_set_len(active) > 0) do {
+
+    // Phase A: remove all sinks (out-degree 0 in active set).
+    // Sinks go to s2 (will become the tail of the final ordering after reversal).
+    changed := true
+    while (changed) do {
+      changed := false
+      sinks := fas_sinks(active, out_deg)
+      sn    := str_list_len(sinks)
+      if (sn > 0) do {
+        changed := true
+        si := 0
+        while (si < sn) do {
+          sink  := str_list_get(sinks, si)
+          node_set_remove(active, sink)
+          str_list_push(s2, sink)
+          // Update out-degree of predecessors still in active.
+          preds := gw_predecessors(g, sink)
+          pn    := str_list_len(preds)
+          pi    := 0
+          while (pi < pn) do {
+            pred := str_list_get(preds, pi)
+            if (node_set_contains(active, pred)) do {
+              deg_map_dec(out_deg, pred)
+            }
+            pi := pi + 1
+          }
+          si := si + 1
+        }
+      }
+    }
+
+    // Phase B: remove all sources (in-degree 0 in active set).
+    // Sources go to s1 (the head of the final ordering).
+    changed := true
+    while (changed) do {
+      changed := false
+      sources := fas_sources(active, in_deg)
+      srn     := str_list_len(sources)
+      if (srn > 0) do {
+        changed := true
+        si := 0
+        while (si < srn) do {
+          src   := str_list_get(sources, si)
+          node_set_remove(active, src)
+          str_list_push(s1, src)
+          // Update in-degree of successors still in active.
+          succs := gw_successors(g, src)
+          sn    := str_list_len(succs)
+          ssi   := 0
+          while (ssi < sn) do {
+            succ := str_list_get(succs, ssi)
+            if (node_set_contains(active, succ)) do {
+              deg_map_dec(in_deg, succ)
+            }
+            ssi := ssi + 1
+          }
+          si := si + 1
+        }
+      }
+    }
+
+    // Phase C: if nodes remain (no pure sinks or sources), pick the node with
+    // the highest (out-degree − in-degree) score and add it to s1.
+    if (node_set_len(active) > 0) do {
+      best  := fas_best_node(active, out_deg, in_deg)
+      node_set_remove(active, best)
+      str_list_push(s1, best)
+      // Update degrees of neighbours still in active.
+      succs := gw_successors(g, best)
+      sn    := str_list_len(succs)
+      ssi   := 0
+      while (ssi < sn) do {
+        succ := str_list_get(succs, ssi)
+        if (node_set_contains(active, succ)) do {
+          deg_map_dec(in_deg, succ)
+        }
+        ssi := ssi + 1
+      }
+      preds := gw_predecessors(g, best)
+      pn    := str_list_len(preds)
+      pi    := 0
+      while (pi < pn) do {
+        pred := str_list_get(preds, pi)
+        if (node_set_contains(active, pred)) do {
+          deg_map_dec(out_deg, pred)
+        }
+        pi := pi + 1
+      }
+    }
+  }
+
+  // Final ordering: s1 ++ reversed(s2).
+  str_list_extend_reversed(s1, s2)
+  s1
+}
+
+
+// ── remove_cycles ──────────────────────────────────────────────────────────────
+// Remove cycles from a directed graph using the greedy-FAS ordering.
+//
+// Algorithm:
+//   1. Compute a linear ordering of nodes with greedy_fas_ordering.
+//   2. For each edge (src → tgt): mark as reversed if src appears after tgt in
+//      the ordering, or if it is a self-loop.
+//   3. Build a new graph: copy all nodes; add each edge, reversing the
+//      direction of any back-edge.
+//
+// Parameters:
+//   g — the directed graph (may contain cycles)
+//
+// Returns: tuple (dag, reversed_edges)
+//   dag            — a copy of g with all back-edges reversed (is a DAG)
+//   reversed_edges — EdgePairList of (original_src, original_tgt) pairs
+//                    that were reversed during cycle removal
+
+remove_cycles := (g) -> {
+  if (gw_node_count(g) == 0) do {
+    // Empty graph: return an empty copy with no reversed edges.
+    empty_ep := edge_pair_list_new()
+    dag_copy := gw_copy(g)
+    (dag_copy, empty_ep)
+  } else {
+    ordering := greedy_fas_ordering(g)
+    pos      := pos_map_from_str_list(ordering)
+    reversed := edge_pair_list_new()
+
+    // Scan all edges to identify which ones are back-edges.
+    all_edges := gw_edges_full(g)
+    en        := edge_info_len(all_edges)
+    ei        := 0
+    while (ei < en) do {
+      src     := edge_info_src(all_edges, ei)
+      tgt     := edge_info_tgt(all_edges, ei)
+      src_pos := pos_map_get(pos, src)
+      tgt_pos := pos_map_get(pos, tgt)
+      is_self := src == tgt
+      if (is_self or src_pos > tgt_pos) do {
+        edge_pair_list_add(reversed, src, tgt)
+      }
+      ei := ei + 1
+    }
+
+    // Build the new DAG: same nodes, edges with back-edges flipped.
+    new_g := mgraph_new()
+
+    // Copy all nodes.
+    nodes := gw_nodes(g)
+    nn    := str_list_len(nodes)
+    ni    := 0
+    while (ni < nn) do {
+      nid := str_list_get(nodes, ni)
+      lbl := gw_node_label(g, nid)
+      shp := gw_node_shape(g, nid)
+      mgraph_add_node_full(new_g, nid, lbl, shp)
+      ni := ni + 1
+    }
+
+    // Add edges, reversing back-edges and skipping self-loops.
+    en2 := edge_info_len(all_edges)
+    ei2 := 0
+    while (ei2 < en2) do {
+      src   := edge_info_src(all_edges, ei2)
+      tgt   := edge_info_tgt(all_edges, ei2)
+      etype := edge_info_etype(all_edges, ei2)
+      lbl   := edge_info_label(all_edges, ei2)
+      if (src != tgt) do {
+        if (edge_pair_list_contains(reversed, src, tgt)) do {
+          mgraph_add_edge_full(new_g, tgt, src, etype, lbl)
+        } else {
+          mgraph_add_edge_full(new_g, src, tgt, etype, lbl)
+        }
+      }
+      ei2 := ei2 + 1
+    }
+
+    dag := mgraph_build(new_g)
+    (dag, reversed)
+  }
+}
+
+
+// ── LayerAssignment struct ─────────────────────────────────────────────────────
+// Result of Phase 2: holds the layer index for every node, the total number of
+// layers, and the back-edges that were reversed in Phase 1.
+//
+// Fields:
+//   layers        — DegMap: node_id → layer index (0-based)
+//   layer_count   — total number of layers (= max layer + 1, minimum 1)
+//   reversed_edges — EdgePairList: (original_src, original_tgt) pairs of edges
+//                   that were reversed during cycle removal so that later phases
+//                   can flip edge routing back to the original visual direction.
+
+LayerAssignment := struct {
+  layers:         DegMap,
+  layer_count:    int,
+  reversed_edges: EdgePairList
+}
+
+
+// ── assign_layers ──────────────────────────────────────────────────────────────
+// Phase 2: assign a layer index to every node using the longest-path method.
+//
+// The longest-path invariant guarantees that every edge (u → v) in the DAG
+// satisfies  layer[v] >= layer[u] + 1, which is required by the Sugiyama
+// framework before dummy-node insertion (Phase 3).
+//
+// Algorithm:
+//   1. Call remove_cycles to get a DAG and the set of reversed edges.
+//   2. Initialise layer[n] = 0 for every node.
+//   3. Propagate: iterate over all DAG edges; for each (src → tgt) where
+//        layer[tgt] < layer[src] + 1,
+//      set layer[tgt] = layer[src] + 1 and mark changed = true.
+//      Repeat until convergence (no update fired in a full sweep).
+//   4. layer_count = max(layer values) + 1.
+//      deg_map_max returns 0 for an empty map, so the empty-graph case
+//      also correctly produces layer_count = 1.
+//
+// Parameters:
+//   g — the directed graph (may contain cycles; must not be modified)
+//
+// Returns: LayerAssignment { layers, layer_count, reversed_edges }
+
+assign_layers := (g) -> LayerAssignment {
+  // Step 1: remove cycles — produces a DAG and records which edges were reversed.
+  dag, reversed := remove_cycles(g)
+
+  // Step 2: initialise every node to layer 0.
+  layers := deg_map_new()
+  nodes  := gw_nodes(g)
+  nn     := str_list_len(nodes)
+  ni     := 0
+  while (ni < nn) do {
+    nid := str_list_get(nodes, ni)
+    deg_map_set(layers, nid, 0)
+    ni := ni + 1
+  }
+
+  // Step 3: longest-path propagation.
+  // The DAG edges do not change during convergence, so compute them once.
+  edges   := gw_edges_full(dag)
+  en      := edge_info_len(edges)
+  changed := true
+  while (changed) do {
+    changed := false
+    ei := 0
+    while (ei < en) do {
+      src       := edge_info_src(edges, ei)
+      tgt       := edge_info_tgt(edges, ei)
+      src_layer := deg_map_get(layers, src)
+      tgt_layer := deg_map_get(layers, tgt)
+      if (tgt_layer < src_layer + 1) do {
+        deg_map_set(layers, tgt, src_layer + 1)
+        changed := true
+      }
+      ei := ei + 1
+    }
+  }
+
+  // Step 4: layer_count = max layer value + 1.
+  // deg_map_max returns 0 for an empty map → empty graph gets layer_count = 1.
+  max_layer   := deg_map_max(layers)
+  layer_count := max_layer + 1
+
+  LayerAssignment { layers: layers, layer_count: layer_count, reversed_edges: reversed }
+}
+
+
+// ── AugmentedGraph struct ──────────────────────────────────────────────────────
+// Result of Phase 3: the layered graph with dummy nodes inserted so that every
+// edge in `graph` spans exactly one layer.
+//
+// Fields:
+//   graph       — new DAG with dummy nodes added; every edge src→tgt satisfies
+//                 layer[tgt] == layer[src] + 1
+//   layers      — DegMap: node_id → layer index (includes dummy nodes)
+//   layer_count — total number of layers (= max layer + 1, minimum 1)
+//   dummy_edges — DummyEdgeList: one entry per original multi-layer edge that
+//                 was split; each entry records the original endpoints, the IDs
+//                 of the intermediate dummy nodes, and the edge metadata.
+
+AugmentedGraph := struct {
+  graph:       Graph,
+  layers:      DegMap,
+  layer_count: int,
+  dummy_edges: DummyEdgeList
+}
+
+
+// ── insert_dummy_nodes ────────────────────────────────────────────────────────
+// Phase 3: break multi-layer edges by inserting dummy nodes.
+//
+// For each edge (src → tgt) where layer[tgt] - layer[src] > 1:
+//   - Insert (diff − 1) dummy nodes at layers src+1, src+2, ..., tgt−1.
+//   - Replace the original edge with a chain of (diff) unit-step segment edges.
+//   - The label is kept on the final segment (nearest to tgt) for later
+//     rendering; intermediate segments carry no label.
+//   - Record the dummy node IDs in a DummyEdgeList entry for Phase 4 onward.
+//
+// Edges that span exactly one layer are copied to the output graph unchanged.
+// Edges going "upward" or staying in the same layer (layer_diff <= 1) are also
+// copied unchanged (this handles reversed-edge artefacts gracefully).
+//
+// Dummy node IDs: "__dummy__<edge_counter>_<step>" where edge_counter counts
+// only multi-layer edges (0-based).
+//
+// Parameters:
+//   dag — cycle-free directed graph from remove_cycles
+//   la  — LayerAssignment from Phase 2 (layers DegMap + reversed_edges)
+//
+// Returns: AugmentedGraph { graph, layers, layer_count, dummy_edges }
+
+insert_dummy_nodes := (dag, la: LayerAssignment) -> AugmentedGraph {
+
+  // ── Step 1: copy all nodes from the DAG into a fresh MutableGraph. ──────────
+  mg    := mgraph_new()
+  nodes := gw_nodes(dag)
+  nn    := str_list_len(nodes)
+  ni    := 0
+  while (ni < nn) do {
+    nid := str_list_get(nodes, ni)
+    lbl := gw_node_label(dag, nid)
+    shp := gw_node_shape(dag, nid)
+    mgraph_add_node_full(mg, nid, lbl, shp)
+    ni := ni + 1
+  }
+
+  // ── Step 2: deep-copy the layer map so we can add entries for dummy nodes. ──
+  layers := deg_map_copy(la.layers)
+
+  dummy_edges  := dummy_edge_list_new()
+  edge_counter := 0
+
+  // ── Step 3: iterate DAG edges; split any that span > 1 layer. ────────────────
+  all_edges := gw_edges_full(dag)
+  en        := edge_info_len(all_edges)
+  ei        := 0
+  while (ei < en) do {
+    src_id := edge_info_src(all_edges, ei)
+    tgt_id := edge_info_tgt(all_edges, ei)
+    etype  := edge_info_etype(all_edges, ei)
+    lbl    := edge_info_label(all_edges, ei)
+
+    src_layer := deg_map_get(layers, src_id)
+    tgt_layer := deg_map_get(layers, tgt_id)
+
+    // layer_diff: positive span from src to tgt; 1 if same/upward (treat as direct).
+    layer_diff := 1
+    if (tgt_layer > src_layer) do {
+      layer_diff := tgt_layer - src_layer
+    }
+
+    if (layer_diff <= 1) do {
+      // Single-layer span — copy edge directly; no dummy nodes needed.
+      mgraph_add_edge_full(mg, src_id, tgt_id, etype, lbl)
+    } else {
+      // Multi-layer span — insert a chain of dummy nodes.
+      steps      := layer_diff - 1
+      this_edge  := edge_counter
+      edge_counter := edge_counter + 1
+
+      dummy_ids  := str_list_new()
+      chain_prev := src_id  // last node in the growing chain
+
+      i := 0
+      while (i < steps) do {
+        dummy_layer := src_layer + i + 1
+        dummy_id    := "__dummy__${this_edge}_${i}"
+
+        // Add dummy node (empty label, Rectangle shape).
+        mgraph_add_node_full(mg, dummy_id, "", "Rectangle")
+        // Register dummy node's layer.
+        deg_map_set(layers, dummy_id, dummy_layer)
+        // Record the dummy id for later phases.
+        str_list_push(dummy_ids, dummy_id)
+
+        // Intermediate segment edge carries no label.
+        mgraph_add_edge_full(mg, chain_prev, dummy_id, etype, "")
+        chain_prev := dummy_id
+
+        i := i + 1
+      }
+
+      // Final segment: connect the last dummy (or src for 1-step chains) to
+      // the original target.  The label travels on the last segment so that
+      // the renderer can place it close to the arrowhead.
+      mgraph_add_edge_full(mg, chain_prev, tgt_id, etype, lbl)
+
+      // Record this multi-layer edge replacement for Phase 4 (crossing min).
+      dummy_edge_list_add(dummy_edges, src_id, tgt_id, dummy_ids, etype, lbl)
+    }
+
+    ei := ei + 1
+  }
+
+  // ── Step 4: recompute layer_count now that dummy nodes are in the map. ───────
+  max_layer   := deg_map_max(layers)
+  layer_count := max_layer + 1
+
+  g := mgraph_build(mg)
+  AugmentedGraph { graph: g, layers: layers, layer_count: layer_count, dummy_edges: dummy_edges }
+}
+
+
+// ── minimise_crossings ────────────────────────────────────────────────────────
+// Phase 4: Reduce edge crossings using the barycenter heuristic.
+//
+// The barycenter method sweeps through layers in forward and backward passes,
+// reordering nodes within each layer to reduce crossings with the adjacent
+// layer.  Up to 24 passes are performed; the sweep stops early once a pass
+// produces no improvement in crossing count.
+//
+// Algorithm:
+//   1. Group nodes into layers based on aug.layers.
+//      Node IDs are processed in alphabetical order (via deg_map_sorted_keys)
+//      so the initial placement within each layer is deterministic.
+//   2. Count initial crossings (baseline for early-exit check).
+//   3. For up to 24 passes:
+//      a. Forward sweep (layers 1 → layer_count-1):
+//           For each layer, sort its nodes by the average position of their
+//           incoming neighbours in the previous layer (barycenter incoming).
+//           Nodes whose predecessors are all absent from the previous layer
+//           receive a barycenter of +∞ and are placed last.
+//      b. Backward sweep (layers layer_count-2 → 0):
+//           For each layer, sort its nodes by the average position of their
+//           outgoing neighbours in the next layer (barycenter outgoing).
+//      c. Count new crossings; if not improved, stop.
+//   4. Return the final OrderingList.
+//
+// Parameters:
+//   aug — AugmentedGraph from Phase 3 (graph, layers DegMap, layer_count)
+//
+// Returns: OrderingList — 2D node ordering, one StrList per layer, in
+//          layer-index order (layer 0 = top row in TD layout).
+//
+// Language notes:
+//   (5) OrderingList is Rc<RefCell<Vec<StrList>>> (layout_state.rs).
+//       ordering_push / ordering_set_layer mutate through the Rc so .hom's
+//       implicit .clone() on variable arguments does not lose mutations.
+//   (6) aug.graph clones the full Graph — acceptable since it is used
+//       read-only by ordering_count_crossings and sort_layer_by_barycenter_*.
+//   (7) Early exit uses an `improved` bool flag (mutated with := inside the
+//       loop) rather than `break => value` to stay close to existing patterns.
+//   (8) `and` / `or` / `not` are the .hom logical operators; && / || / ! are
+//       not lexed.
+
+minimise_crossings := (aug: AugmentedGraph) -> OrderingList {
+  layer_count := aug.layer_count
+
+  // ── Step 1: build initial ordering ─────────────────────────────────────────
+  // Populate each layer with its nodes in alphabetical order for determinism.
+  ordering     := ordering_new(layer_count)
+  all_node_ids := deg_map_sorted_keys(aug.layers)
+  total_nodes  := str_list_len(all_node_ids)
+  ni := 0
+  while (ni < total_nodes) do {
+    nid       := str_list_get(all_node_ids, ni)
+    layer_idx := deg_map_get(aug.layers, nid)
+    ordering_push(ordering, layer_idx, nid)
+    ni := ni + 1
+  }
+
+  // ── Step 2: count initial crossings ────────────────────────────────────────
+  best := ordering_count_crossings(ordering, aug.graph)
+
+  // ── Step 3: forward/backward sweep passes ──────────────────────────────────
+  pass     := 0
+  improved := true
+  while (pass < 24 and improved) do {
+
+    // Forward sweep: sort each layer (1..layer_count-1) by incoming barycenter.
+    fwd := 1
+    while (fwd < layer_count) do {
+      prev_layer   := ordering_get_layer(ordering, fwd - 1)
+      prev_pos     := float_map_from_str_list(prev_layer)
+      cur_layer    := ordering_get_layer(ordering, fwd)
+      sorted_layer := sort_layer_by_barycenter_incoming(cur_layer, aug.graph, prev_pos)
+      ordering_set_layer(ordering, fwd, sorted_layer)
+      fwd := fwd + 1
+    }
+
+    // Backward sweep: sort each layer (layer_count-2..0) by outgoing barycenter.
+    bwd := layer_count - 2
+    while (bwd >= 0) do {
+      next_layer   := ordering_get_layer(ordering, bwd + 1)
+      next_pos     := float_map_from_str_list(next_layer)
+      cur_layer    := ordering_get_layer(ordering, bwd)
+      sorted_layer := sort_layer_by_barycenter_outgoing(cur_layer, aug.graph, next_pos)
+      ordering_set_layer(ordering, bwd, sorted_layer)
+      bwd := bwd - 1
+    }
+
+    // Check for improvement; stop early if no progress.
+    new_crossings := ordering_count_crossings(ordering, aug.graph)
+    if (new_crossings >= best) do {
+      improved := false
+    } else {
+      best := new_crossings
+    }
+
+    pass := pass + 1
+  }
+
+  ordering
+}

@@ -1,0 +1,666 @@
+// test_pathfinder.hom — Tests for pathfinder.hom (Part 1)
+//
+// Exercises: grid_new, grid_mark_blocked, grid_is_free
+//
+// Notes:
+//  - No `use std` — pathfinder.hom transitively includes it.  A second
+//    `use std` produces duplicate symbol definitions in the combined output.
+//  - No check(cond, msg) helper — .hom string literals are &str but a
+//    helper typed (msg: str) generates a String parameter, causing a type
+//    mismatch.  Use direct if/else + print instead (pattern from test_heap).
+//  - Use while loops for iteration — same reason (range! macro not in scope
+//    without an explicit `use std`).
+//
+// Compile + run (copy pathfinder.hom + grid_data.rs to the same dir first):
+//   homunc test_pathfinder.hom -o /tmp/test_pathfinder.rs
+//   rustc /tmp/test_pathfinder.rs -o /tmp/test_pathfinder && /tmp/test_pathfinder
+
+use pathfinder
+// Language note: importing test_dummy.rs (empty) sets has_rs_dep=true in the
+// homunc resolver, switching sema to skip_undef mode.  This is required
+// because the Part 2 tests call functions from path_state.rs (point_list_*)
+// and layout_types (point_new/Point) which the sema checker cannot see
+// through transitive .rs imports.  No runtime duplication: test_dummy is
+// empty.  See mermaid-hom/tests/test_dummy.rs for the full explanation.
+use test_dummy
+
+// ── grid_new ──────────────────────────────────────────────────────────────────
+
+test_grid_new_dimensions := () -> _ {
+  g := grid_new(10, 8)
+  if (g.width == 10) do {
+    print("  ok: grid_new width == 10")
+  } else {
+    print("FAIL: grid_new width == 10")
+  }
+  if (g.height == 8) do {
+    print("  ok: grid_new height == 8")
+  } else {
+    print("FAIL: grid_new height == 8")
+  }
+}
+
+test_grid_new_all_free := () -> _ {
+  g := grid_new(5, 4)
+  all_free := true
+  row := 0
+  while (row < 4) do {
+    col := 0
+    while (col < 5) do {
+      if (grid_is_free(g, col, row) == false) do {
+        all_free := false
+      }
+      col := col + 1
+    }
+    row := row + 1
+  }
+  if (all_free) do {
+    print("  ok: grid_new all cells free")
+  } else {
+    print("FAIL: grid_new all cells free")
+  }
+}
+
+test_grid_new_small := () -> _ {
+  g := grid_new(1, 1)
+  if (g.width == 1) do {
+    print("  ok: 1x1 grid width == 1")
+  } else {
+    print("FAIL: 1x1 grid width == 1")
+  }
+  if (g.height == 1) do {
+    print("  ok: 1x1 grid height == 1")
+  } else {
+    print("FAIL: 1x1 grid height == 1")
+  }
+  if (grid_is_free(g, 0, 0)) do {
+    print("  ok: 1x1 grid (0,0) is free")
+  } else {
+    print("FAIL: 1x1 grid (0,0) is free")
+  }
+}
+
+// ── grid_is_free — bounds checks ──────────────────────────────────────────────
+
+test_grid_is_free_out_of_bounds := () -> _ {
+  g := grid_new(6, 5)
+  if (grid_is_free(g, -1, 0) == false) do {
+    print("  ok: oob left is not free")
+  } else {
+    print("FAIL: oob left is not free")
+  }
+  if (grid_is_free(g, 6, 0) == false) do {
+    print("  ok: oob right is not free")
+  } else {
+    print("FAIL: oob right is not free")
+  }
+  if (grid_is_free(g, 0, -1) == false) do {
+    print("  ok: oob top is not free")
+  } else {
+    print("FAIL: oob top is not free")
+  }
+  if (grid_is_free(g, 0, 5) == false) do {
+    print("  ok: oob bottom is not free")
+  } else {
+    print("FAIL: oob bottom is not free")
+  }
+  if (grid_is_free(g, 0, 0)) do {
+    print("  ok: top-left corner (0,0) is free")
+  } else {
+    print("FAIL: top-left corner (0,0) is free")
+  }
+  if (grid_is_free(g, 5, 4)) do {
+    print("  ok: bottom-right corner (5,4) is free")
+  } else {
+    print("FAIL: bottom-right corner (5,4) is free")
+  }
+}
+
+// ── grid_mark_blocked ─────────────────────────────────────────────────────────
+
+test_grid_mark_blocked_simple := () -> _ {
+  g := grid_new(10, 10)
+  grid_mark_blocked(g, 2, 3, 4, 2)
+  // Row 3, cols 2..5 should be blocked
+  if (grid_is_free(g, 2, 3) == false) do {
+    print("  ok: cell (2,3) blocked")
+  } else {
+    print("FAIL: cell (2,3) blocked")
+  }
+  if (grid_is_free(g, 3, 3) == false) do {
+    print("  ok: cell (3,3) blocked")
+  } else {
+    print("FAIL: cell (3,3) blocked")
+  }
+  if (grid_is_free(g, 4, 3) == false) do {
+    print("  ok: cell (4,3) blocked")
+  } else {
+    print("FAIL: cell (4,3) blocked")
+  }
+  if (grid_is_free(g, 5, 3) == false) do {
+    print("  ok: cell (5,3) blocked")
+  } else {
+    print("FAIL: cell (5,3) blocked")
+  }
+  // Row 4, cols 2..5 blocked
+  if (grid_is_free(g, 2, 4) == false) do {
+    print("  ok: cell (2,4) blocked")
+  } else {
+    print("FAIL: cell (2,4) blocked")
+  }
+  if (grid_is_free(g, 5, 4) == false) do {
+    print("  ok: cell (5,4) blocked")
+  } else {
+    print("FAIL: cell (5,4) blocked")
+  }
+  // Adjacent cells outside rect remain free
+  if (grid_is_free(g, 1, 3)) do {
+    print("  ok: cell (1,3) left of rect is free")
+  } else {
+    print("FAIL: cell (1,3) left of rect is free")
+  }
+  if (grid_is_free(g, 6, 3)) do {
+    print("  ok: cell (6,3) right of rect is free")
+  } else {
+    print("FAIL: cell (6,3) right of rect is free")
+  }
+  if (grid_is_free(g, 2, 2)) do {
+    print("  ok: cell (2,2) above rect is free")
+  } else {
+    print("FAIL: cell (2,2) above rect is free")
+  }
+  if (grid_is_free(g, 2, 5)) do {
+    print("  ok: cell (2,5) below rect is free")
+  } else {
+    print("FAIL: cell (2,5) below rect is free")
+  }
+}
+
+test_grid_mark_blocked_single_cell := () -> _ {
+  g := grid_new(5, 5)
+  grid_mark_blocked(g, 2, 2, 1, 1)
+  if (grid_is_free(g, 2, 2) == false) do {
+    print("  ok: single cell (2,2) is blocked")
+  } else {
+    print("FAIL: single cell (2,2) is blocked")
+  }
+  if (grid_is_free(g, 1, 2)) do {
+    print("  ok: neighbor left (1,2) is free")
+  } else {
+    print("FAIL: neighbor left (1,2) is free")
+  }
+  if (grid_is_free(g, 3, 2)) do {
+    print("  ok: neighbor right (3,2) is free")
+  } else {
+    print("FAIL: neighbor right (3,2) is free")
+  }
+  if (grid_is_free(g, 2, 1)) do {
+    print("  ok: neighbor above (2,1) is free")
+  } else {
+    print("FAIL: neighbor above (2,1) is free")
+  }
+  if (grid_is_free(g, 2, 3)) do {
+    print("  ok: neighbor below (2,3) is free")
+  } else {
+    print("FAIL: neighbor below (2,3) is free")
+  }
+}
+
+test_grid_mark_blocked_clips_to_right_bottom := () -> _ {
+  g := grid_new(5, 5)
+  grid_mark_blocked(g, 3, 3, 10, 10)
+  if (grid_is_free(g, 3, 3) == false) do {
+    print("  ok: (3,3) blocked (clip right-bottom)")
+  } else {
+    print("FAIL: (3,3) blocked (clip right-bottom)")
+  }
+  if (grid_is_free(g, 4, 4) == false) do {
+    print("  ok: (4,4) blocked (clip right-bottom)")
+  } else {
+    print("FAIL: (4,4) blocked (clip right-bottom)")
+  }
+  if (grid_is_free(g, 0, 0)) do {
+    print("  ok: (0,0) still free after clip")
+  } else {
+    print("FAIL: (0,0) still free after clip")
+  }
+  if (grid_is_free(g, 2, 2)) do {
+    print("  ok: (2,2) still free after clip")
+  } else {
+    print("FAIL: (2,2) still free after clip")
+  }
+}
+
+test_grid_mark_blocked_clips_to_left_top := () -> _ {
+  g := grid_new(5, 5)
+  // rect (-2,-1,4,3) clips to cols 0..2, rows 0..2
+  grid_mark_blocked(g, -2, -1, 4, 3)
+  if (grid_is_free(g, 0, 0) == false) do {
+    print("  ok: (0,0) blocked (neg clip)")
+  } else {
+    print("FAIL: (0,0) blocked (neg clip)")
+  }
+  if (grid_is_free(g, 1, 1) == false) do {
+    print("  ok: (1,1) blocked (neg clip)")
+  } else {
+    print("FAIL: (1,1) blocked (neg clip)")
+  }
+  if (grid_is_free(g, 2, 0)) do {
+    print("  ok: (2,0) outside clipped rect is free")
+  } else {
+    print("FAIL: (2,0) outside clipped rect is free")
+  }
+  if (grid_is_free(g, 0, 2)) do {
+    print("  ok: (0,2) outside clipped rect is free")
+  } else {
+    print("FAIL: (0,2) outside clipped rect is free")
+  }
+}
+
+test_grid_mark_blocked_full_coverage := () -> _ {
+  g := grid_new(3, 3)
+  grid_mark_blocked(g, 0, 0, 3, 3)
+  none_free := true
+  row := 0
+  while (row < 3) do {
+    col := 0
+    while (col < 3) do {
+      if (grid_is_free(g, col, row)) do {
+        none_free := false
+      }
+      col := col + 1
+    }
+    row := row + 1
+  }
+  if (none_free) do {
+    print("  ok: 3x3 full-block: no cells free")
+  } else {
+    print("FAIL: 3x3 full-block: no cells free")
+  }
+}
+
+test_grid_mark_blocked_multiple_rects := () -> _ {
+  g := grid_new(10, 10)
+  grid_mark_blocked(g, 1, 1, 2, 2)
+  grid_mark_blocked(g, 6, 6, 2, 2)
+  if (grid_is_free(g, 1, 1) == false) do {
+    print("  ok: first rect top-left blocked")
+  } else {
+    print("FAIL: first rect top-left blocked")
+  }
+  if (grid_is_free(g, 2, 2) == false) do {
+    print("  ok: first rect bottom-right blocked")
+  } else {
+    print("FAIL: first rect bottom-right blocked")
+  }
+  if (grid_is_free(g, 6, 6) == false) do {
+    print("  ok: second rect top-left blocked")
+  } else {
+    print("FAIL: second rect top-left blocked")
+  }
+  if (grid_is_free(g, 7, 7) == false) do {
+    print("  ok: second rect bottom-right blocked")
+  } else {
+    print("FAIL: second rect bottom-right blocked")
+  }
+  if (grid_is_free(g, 4, 4)) do {
+    print("  ok: gap between rects is free")
+  } else {
+    print("FAIL: gap between rects is free")
+  }
+}
+
+// ── heuristic ─────────────────────────────────────────────────────────────────
+// Manhattan distance + corner penalty when both dx and dy are non-zero.
+
+test_heuristic_same_point := () -> _ {
+  h := heuristic(3, 3, 3, 3)
+  if (h == 0) do {
+    print("  ok: heuristic same point == 0")
+  } else {
+    print("FAIL: heuristic same point == 0")
+  }
+}
+
+test_heuristic_horizontal := () -> _ {
+  h := heuristic(0, 0, 5, 0)
+  if (h == 5) do {
+    print("  ok: heuristic horizontal straight == 5")
+  } else {
+    print("FAIL: heuristic horizontal straight == 5")
+  }
+}
+
+test_heuristic_vertical := () -> _ {
+  h := heuristic(0, 0, 0, 4)
+  if (h == 4) do {
+    print("  ok: heuristic vertical straight == 4")
+  } else {
+    print("FAIL: heuristic vertical straight == 4")
+  }
+}
+
+test_heuristic_corner_penalty := () -> _ {
+  // dx=3, dy=4, both nonzero => 3+4+1 == 8
+  h := heuristic(0, 0, 3, 4)
+  if (h == 8) do {
+    print("  ok: heuristic corner penalty (3,4) == 8")
+  } else {
+    print("FAIL: heuristic corner penalty (3,4) == 8")
+  }
+}
+
+test_heuristic_reverse_corner := () -> _ {
+  // Symmetric: heuristic(5,5,2,1) == heuristic(2,1,5,5) == |3|+|4|+1 == 8
+  h1 := heuristic(5, 5, 2, 1)
+  h2 := heuristic(2, 1, 5, 5)
+  if (h1 == 8) do {
+    print("  ok: heuristic reverse corner h1 == 8")
+  } else {
+    print("FAIL: heuristic reverse corner h1 == 8")
+  }
+  if (h1 == h2) do {
+    print("  ok: heuristic is symmetric")
+  } else {
+    print("FAIL: heuristic is symmetric")
+  }
+}
+
+test_heuristic_one_step := () -> _ {
+  // Single step in each direction: no corner penalty
+  if (heuristic(0, 0, 1, 0) == 1) do {
+    print("  ok: heuristic one step right == 1")
+  } else {
+    print("FAIL: heuristic one step right == 1")
+  }
+  if (heuristic(0, 0, 0, 1) == 1) do {
+    print("  ok: heuristic one step down == 1")
+  } else {
+    print("FAIL: heuristic one step down == 1")
+  }
+}
+
+// ── a_star ────────────────────────────────────────────────────────────────────
+
+test_a_star_trivial := () -> _ {
+  // Start == End: path is a single point
+  g := grid_new(3, 3)
+  s := point_new(1, 1)
+  e := point_new(1, 1)
+  path := a_star(g, s, e)
+  n := point_list_len(path)
+  if (n == 1) do {
+    print("  ok: a_star trivial (start==end) returns 1 point")
+  } else {
+    print("FAIL: a_star trivial (start==end) returns 1 point")
+  }
+  if (point_list_get_x(path, 0) == 1) do {
+    print("  ok: a_star trivial point x == 1")
+  } else {
+    print("FAIL: a_star trivial point x == 1")
+  }
+  if (point_list_get_y(path, 0) == 1) do {
+    print("  ok: a_star trivial point y == 1")
+  } else {
+    print("FAIL: a_star trivial point y == 1")
+  }
+}
+
+test_a_star_straight_horizontal := () -> _ {
+  // Open 10x5 grid; straight path along y=0 from x=0 to x=4 → 5 points
+  g := grid_new(10, 5)
+  s := point_new(0, 0)
+  e := point_new(4, 0)
+  path := a_star(g, s, e)
+  n := point_list_len(path)
+  if (n == 5) do {
+    print("  ok: a_star straight horizontal → 5 points")
+  } else {
+    print("FAIL: a_star straight horizontal → 5 points")
+  }
+  if (point_list_get_x(path, 0) == 0) do {
+    print("  ok: a_star straight start.x == 0")
+  } else {
+    print("FAIL: a_star straight start.x == 0")
+  }
+  end_idx := n - 1
+  if (point_list_get_x(path, end_idx) == 4) do {
+    print("  ok: a_star straight end.x == 4")
+  } else {
+    print("FAIL: a_star straight end.x == 4")
+  }
+}
+
+test_a_star_around_obstacle := () -> _ {
+  // 5x5 grid; block column x=2 for rows 0..3 (row 4 stays open).
+  // Path must go around: (0,2)→...→(2,4)→...→(4,2).
+  g := grid_new(5, 5)
+  grid_mark_blocked(g, 2, 0, 1, 4)
+  s := point_new(0, 2)
+  e := point_new(4, 2)
+  path := a_star(g, s, e)
+  n := point_list_len(path)
+  if (n > 0) do {
+    print("  ok: a_star found path around obstacle (n > 0)")
+  } else {
+    print("FAIL: a_star found path around obstacle (n > 0)")
+  }
+  if (point_list_get_x(path, 0) == 0) do {
+    print("  ok: a_star around obstacle start.x == 0")
+  } else {
+    print("FAIL: a_star around obstacle start.x == 0")
+  }
+  if (point_list_get_y(path, 0) == 2) do {
+    print("  ok: a_star around obstacle start.y == 2")
+  } else {
+    print("FAIL: a_star around obstacle start.y == 2")
+  }
+  aidx := n - 1
+  if (point_list_get_x(path, aidx) == 4) do {
+    print("  ok: a_star around obstacle end.x == 4")
+  } else {
+    print("FAIL: a_star around obstacle end.x == 4")
+  }
+  if (point_list_get_y(path, aidx) == 2) do {
+    print("  ok: a_star around obstacle end.y == 2")
+  } else {
+    print("FAIL: a_star around obstacle end.y == 2")
+  }
+}
+
+test_a_star_no_path := () -> _ {
+  // 5x5 grid; block full column x=2 (rows 0..4).
+  // No passage from left half to right half — a_star returns empty list.
+  g := grid_new(5, 5)
+  grid_mark_blocked(g, 2, 0, 1, 5)
+  s := point_new(0, 2)
+  e := point_new(4, 2)
+  path := a_star(g, s, e)
+  n := point_list_len(path)
+  if (n == 0) do {
+    print("  ok: a_star no path returns empty list")
+  } else {
+    print("FAIL: a_star no path returns empty list")
+  }
+}
+
+// ── simplify_path ─────────────────────────────────────────────────────────────
+
+test_simplify_empty := () -> _ {
+  path := point_list_new()
+  result := simplify_path(path)
+  n := point_list_len(result)
+  if (n == 0) do {
+    print("  ok: simplify_path empty → 0 points")
+  } else {
+    print("FAIL: simplify_path empty → 0 points")
+  }
+}
+
+test_simplify_one_point := () -> _ {
+  path := point_list_new()
+  point_list_push(path, 3, 7)
+  result := simplify_path(path)
+  n := point_list_len(result)
+  if (n == 1) do {
+    print("  ok: simplify_path 1 point → 1 point")
+  } else {
+    print("FAIL: simplify_path 1 point → 1 point")
+  }
+  if (point_list_get_x(result, 0) == 3) do {
+    print("  ok: simplify_path 1 point preserved x==3")
+  } else {
+    print("FAIL: simplify_path 1 point preserved x==3")
+  }
+}
+
+test_simplify_two_points := () -> _ {
+  path := point_list_new()
+  point_list_push(path, 1, 2)
+  point_list_push(path, 5, 2)
+  result := simplify_path(path)
+  n := point_list_len(result)
+  if (n == 2) do {
+    print("  ok: simplify_path 2 points → 2 points")
+  } else {
+    print("FAIL: simplify_path 2 points → 2 points")
+  }
+}
+
+test_simplify_collinear_horizontal := () -> _ {
+  // 4 collinear points along y=0: keep only first and last
+  path := point_list_new()
+  point_list_push(path, 0, 0)
+  point_list_push(path, 1, 0)
+  point_list_push(path, 2, 0)
+  point_list_push(path, 3, 0)
+  result := simplify_path(path)
+  n := point_list_len(result)
+  if (n == 2) do {
+    print("  ok: simplify_path collinear horizontal → 2 points")
+  } else {
+    print("FAIL: simplify_path collinear horizontal → 2 points")
+  }
+  if (point_list_get_x(result, 0) == 0) do {
+    print("  ok: simplify_path collinear start.x == 0")
+  } else {
+    print("FAIL: simplify_path collinear start.x == 0")
+  }
+  if (point_list_get_x(result, 1) == 3) do {
+    print("  ok: simplify_path collinear end.x == 3")
+  } else {
+    print("FAIL: simplify_path collinear end.x == 3")
+  }
+}
+
+test_simplify_l_shape := () -> _ {
+  // L-shape: (0,0)→(2,0)→(2,3). Direction changes at (2,0) → keep all 3.
+  path := point_list_new()
+  point_list_push(path, 0, 0)
+  point_list_push(path, 2, 0)
+  point_list_push(path, 2, 3)
+  result := simplify_path(path)
+  n := point_list_len(result)
+  if (n == 3) do {
+    print("  ok: simplify_path L-shape → 3 points")
+  } else {
+    print("FAIL: simplify_path L-shape → 3 points")
+  }
+  if (point_list_get_x(result, 1) == 2) do {
+    print("  ok: simplify_path L-shape corner.x == 2")
+  } else {
+    print("FAIL: simplify_path L-shape corner.x == 2")
+  }
+  if (point_list_get_y(result, 1) == 0) do {
+    print("  ok: simplify_path L-shape corner.y == 0")
+  } else {
+    print("FAIL: simplify_path L-shape corner.y == 0")
+  }
+}
+
+test_simplify_mixed := () -> _ {
+  // Path: (0,0)→(1,0)→(2,0)→(2,1)→(2,2)→(3,2)
+  // (1,0) is collinear with (0,0)→(2,0); remove.
+  // (2,0) is a corner (right→down); keep.
+  // (2,1) is collinear with (2,0)→(2,2); remove.
+  // (2,2) is a corner (down→right); keep.
+  // Result: (0,0),(2,0),(2,2),(3,2) — 4 points.
+  path := point_list_new()
+  point_list_push(path, 0, 0)
+  point_list_push(path, 1, 0)
+  point_list_push(path, 2, 0)
+  point_list_push(path, 2, 1)
+  point_list_push(path, 2, 2)
+  point_list_push(path, 3, 2)
+  result := simplify_path(path)
+  n := point_list_len(result)
+  if (n == 4) do {
+    print("  ok: simplify_path mixed → 4 points")
+  } else {
+    print("FAIL: simplify_path mixed → 4 points")
+  }
+  if (point_list_get_x(result, 0) == 0) do {
+    print("  ok: simplify_path mixed[0].x == 0")
+  } else {
+    print("FAIL: simplify_path mixed[0].x == 0")
+  }
+  if (point_list_get_x(result, 1) == 2) do {
+    print("  ok: simplify_path mixed[1].x == 2")
+  } else {
+    print("FAIL: simplify_path mixed[1].x == 2")
+  }
+  if (point_list_get_y(result, 1) == 0) do {
+    print("  ok: simplify_path mixed[1].y == 0")
+  } else {
+    print("FAIL: simplify_path mixed[1].y == 0")
+  }
+  if (point_list_get_x(result, 2) == 2) do {
+    print("  ok: simplify_path mixed[2].x == 2")
+  } else {
+    print("FAIL: simplify_path mixed[2].x == 2")
+  }
+  if (point_list_get_y(result, 2) == 2) do {
+    print("  ok: simplify_path mixed[2].y == 2")
+  } else {
+    print("FAIL: simplify_path mixed[2].y == 2")
+  }
+  if (point_list_get_x(result, 3) == 3) do {
+    print("  ok: simplify_path mixed[3].x == 3")
+  } else {
+    print("FAIL: simplify_path mixed[3].x == 3")
+  }
+}
+
+// ── Run all ───────────────────────────────────────────────────────────────────
+
+main := () -> _ {
+  print("=== test_pathfinder (Part 1: OccupancyGrid) ===")
+  test_grid_new_dimensions()
+  test_grid_new_all_free()
+  test_grid_new_small()
+  test_grid_is_free_out_of_bounds()
+  test_grid_mark_blocked_simple()
+  test_grid_mark_blocked_single_cell()
+  test_grid_mark_blocked_clips_to_right_bottom()
+  test_grid_mark_blocked_clips_to_left_top()
+  test_grid_mark_blocked_full_coverage()
+  test_grid_mark_blocked_multiple_rects()
+  print("=== test_pathfinder (Part 2: heuristic + a_star + simplify_path) ===")
+  test_heuristic_same_point()
+  test_heuristic_horizontal()
+  test_heuristic_vertical()
+  test_heuristic_corner_penalty()
+  test_heuristic_reverse_corner()
+  test_heuristic_one_step()
+  test_a_star_trivial()
+  test_a_star_straight_horizontal()
+  test_a_star_around_obstacle()
+  test_a_star_no_path()
+  test_simplify_empty()
+  test_simplify_one_point()
+  test_simplify_two_points()
+  test_simplify_collinear_horizontal()
+  test_simplify_l_shape()
+  test_simplify_mixed()
+  print("=== done ===")
+}

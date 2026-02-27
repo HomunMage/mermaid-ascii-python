@@ -3,9 +3,27 @@ FROM rust:latest AS builder
 RUN rustup target add wasm32-unknown-unknown
 RUN cargo install wasm-pack
 
+ARG VERSION=dev
+
 WORKDIR /app
 COPY . .
+ENV MERMAID_ASCII_VERSION=${VERSION}
+
+# Download released homunc to compile .hom files (detect host arch)
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+      amd64) HOMUNC_ARCH="x86_64" ;; \
+      arm64) HOMUNC_ARCH="aarch64" ;; \
+      *) HOMUNC_ARCH="x86_64" ;; \
+    esac && \
+    wget -q "https://github.com/HomunMage/Homun-Lang/releases/latest/download/homunc-linux-${HOMUNC_ARCH}" -O /usr/local/bin/homunc \
+    && chmod +x /usr/local/bin/homunc \
+    || true
+RUN find src -name '*.hom' -exec sh -c 'homunc --raw "$1" -o "${1%.hom}.rs"' _ {} \; 2>/dev/null || true
+
 RUN wasm-pack build --target web --no-default-features --features wasm
+RUN echo "${VERSION}" > /app/version.txt
 
 FROM scratch AS export
 COPY --from=builder /app/pkg/ /
+COPY --from=builder /app/version.txt /

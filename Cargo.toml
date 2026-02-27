@@ -7,17 +7,13 @@ authors = []
 
 [[bin]]
 name = "mermaid-ascii"
-path = "src/rust/main.rs"
+path = "src/main.rs"
 required-features = ["cli"]
 
 [lib]
 name = "mermaid_ascii"
-path = "src/rust/lib.rs"
+path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
-
-[[test]]
-name = "test_binary"
-path = "tests/e2e/test_binary.rs"
 
 [features]
 default = ["cli"]
@@ -26,6 +22,7 @@ wasm = ["wasm-bindgen"]
 
 [dependencies]
 petgraph = "0.6"
+regex = "1"
 clap = { version = "4", features = ["derive"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 

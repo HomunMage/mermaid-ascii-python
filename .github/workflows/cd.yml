@@ -22,16 +22,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build WASM with Docker
+      - name: Download released WASM
         run: |
-          docker buildx build \
-            -f Dockerfile.wasm \
-            --output type=local,dest=./wasm-out .
-
-      - name: Copy WASM to _site
-        run: |
-          cp wasm-out/mermaid_ascii.js _site/
-          cp wasm-out/mermaid_ascii_bg.wasm _site/
+          wget -q https://github.com/HomunMage/mermaid-ascii/releases/latest/download/mermaid-ascii-wasm.tar.gz
+          tar xzf mermaid-ascii-wasm.tar.gz -C _site/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

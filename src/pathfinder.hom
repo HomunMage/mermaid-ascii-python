@@ -1,0 +1,278 @@
+// pathfinder.hom — A* edge routing on a 2D occupancy grid
+//
+// Part 1: OccupancyGrid struct + creation and query functions.
+// Part 2: heuristic, a_star (A* shortest path), simplify_path;
+//         DIRS constant (4-directional neighbors).
+//
+// Structs:   OccupancyGrid
+// Functions: grid_new, grid_mark_blocked, grid_is_free,
+//            heuristic, a_star, simplify_path
+//
+// Language notes:
+//  (1) .hom codegen wraps all Var args in .clone(). For Vec<T> this clones
+//      the whole Vec — mutations are lost. Workaround: use Rc<RefCell<...>>
+//      dep types so .clone() is a cheap pointer-bump to shared data.
+//  (2) Use 'or' / 'and' / 'not' keywords — '||', '&&', '!' are not lexed.
+//  (3) Test files must NOT re-import 'use std' if the module they import
+//      already uses it (duplicate symbol error).
+//  (4) Top-level variables compile to Rust 'const X: _ = ...' which fails
+//      (type placeholder in const is not allowed). DIRS is therefore defined
+//      inline inside a_star as a local list literal.
+//  (5) String vs &str mismatch: runtime functions like parse_int take &str
+//      but .hom codegen emits var.clone() which is String. Functions in
+//      dep/path_state.rs accept String where needed (str_to_key, etc.).
+//  (6) Point is defined in dep/path_state.rs, NOT in layout_types.hom.
+//      The homun codegen emits EnumName.Variant (dot) instead of
+//      EnumName::Variant (Rust ::-scope). Importing layout_types.hom pulls
+//      in types.hom which has direction_default() and node_shape_default()
+//      that create enum values — these generate invalid Rust and fail to
+//      compile. Using Point from path_state.rs avoids the entire chain.
+//
+// Dependencies:
+//   dep/grid_data.rs   — Rc<RefCell<Vec<bool>>> for the occupancy store
+//   dep/path_state.rs  — Point, CostData, PointList, pos encoding for A*
+//   runtime/heap.rs    — min-heap priority queue
+
+use std
+use grid_data
+use path_state
+use heap
+
+
+// ── OccupancyGrid ─────────────────────────────────────────────────────────────
+// A 2D boolean grid tracking which cells are occupied by node boxes.
+//
+// The blocked data is stored as a flat row-major array inside a GridData
+// (Rc<RefCell<Vec<bool>>>).  Access index = row * width + col.
+// data[index] == true  →  that cell is inside a node rectangle.
+// data[index] == false →  that cell is open (an edge may pass through).
+
+OccupancyGrid := struct {
+  width:  int,
+  height: int,
+  data:   GridData
+}
+
+// Create a new OccupancyGrid of the given dimensions.
+// All cells are initialised to false (free).
+grid_new := (width: int, height: int) -> OccupancyGrid {
+  OccupancyGrid {
+    width:  width,
+    height: height,
+    data:   grid_data_new(width, height)
+  }
+}
+
+// Mark every cell within the rectangle (x, y, w, h) as blocked.
+// The rectangle is clipped silently to the grid bounds.
+//
+// Language note: `data` is bound to `grid.data` so the codegen emits
+// `data.clone()` on each call — which is a cheap Rc pointer copy that
+// still refers to the same underlying RefCell<Vec<bool>>.
+grid_mark_blocked := (grid: OccupancyGrid, x: int, y: int, w: int, h: int) -> _ {
+  row_lo := max(0, y)
+  row_hi := min(grid.height, y + h)
+  col_lo := max(0, x)
+  col_hi := min(grid.width, x + w)
+  data   := grid.data
+  gw     := grid.width
+  for row in range(row_lo, row_hi) do {
+    for col in range(col_lo, col_hi) do {
+      grid_data_set(data, row, col, gw, true)
+    }
+  }
+}
+
+// Return true if the cell at (x, y) is within bounds and not blocked.
+// Out-of-bounds coordinates always return false.
+//
+// Language note: same `data` trick — bind to a local so codegen calls
+// `data.clone()` rather than moving `grid.data`.
+grid_is_free := (grid: OccupancyGrid, x: int, y: int) -> bool {
+  if (x >= 0 and x < grid.width and y >= 0 and y < grid.height) do {
+    data := grid.data
+    gw   := grid.width
+    grid_data_get(data, y, x, gw) == false
+  } else {
+    false
+  }
+}
+
+// ── heuristic ─────────────────────────────────────────────────────────────────
+// Manhattan distance with a +1 corner penalty when both dx and dy are non-zero.
+// This slightly prefers straight paths over L-shaped ones (from reference impl).
+//
+// DIRS: 4-directional cardinal neighbors — (dx, dy) offsets.
+// Defined inline in a_star below (see language note 4 above).
+
+heuristic := (ax: int, ay: int, bx: int, by: int) -> int {
+  dx := abs(ax - bx)
+  dy := abs(ay - by)
+  if (dx == 0 or dy == 0) do {
+    dx + dy
+  } else {
+    dx + dy + 1
+  }
+}
+
+// ── a_star ────────────────────────────────────────────────────────────────────
+// Find the shortest orthogonal path from `start` to `end` on `grid`,
+// avoiding blocked cells.  The goal cell is allowed to be blocked (edges
+// terminate on node borders).
+//
+// Returns a PointList of (x, y) waypoints from start to end (inclusive).
+// Returns an EMPTY PointList when no path exists (callers check
+// point_list_len(result) == 0 for the "no path" case).
+//
+// Algorithm: standard A* with:
+//   - min-heap open set (heap library)
+//   - flat-index CostData arrays for g-cost and predecessor storage
+//   - Manhattan + corner-penalty heuristic
+//   - DIRS: four cardinal directions @[(0,1),(0,-1),(1,0),(-1,0)]
+//
+// Language notes:
+//   - Positions are encoded as flat indices (key = y*width + x) and stored
+//     as decimal strings in heap items via key_to_str / str_to_key.
+//   - CostData and PointList use Rc<RefCell<...>> so .hom's clone-based
+//     calling convention does not lose mutations.
+//   - -1 in CostData means "unvisited"; -2 means "start (no predecessor)".
+
+a_star := (grid: OccupancyGrid, start: Point, end: Point) -> PointList {
+  sx := start.x
+  sy := start.y
+  ex := end.x
+  ey := end.y
+  gw := grid.width
+  gh := grid.height
+
+  size  := gw * gh
+  cost  := cost_data_new(size)   // g-cost; -1 = unvisited
+  prev  := cost_data_new(size)   // predecessor flat-index; -2 = start
+
+  start_key := pos_to_key(sx, sy, gw)
+  cost_data_set(cost, start_key, 0)
+  cost_data_set(prev, start_key, -2)
+
+  h := heap_new()
+  heap_push(h, heuristic(sx, sy, ex, ey), key_to_str(start_key))
+
+  done  := false
+  found := false
+
+  while (not done and not heap_is_empty(h)) do {
+    r := heap_pop(h)
+    match r {
+      Some((_, pos_str)) => {
+        cur_key  := str_to_key(pos_str)
+        cx       := key_to_x(cur_key, gw)
+        cy       := key_to_y(cur_key, gw)
+
+        if (cx == ex and cy == ey) do {
+          done  := true
+          found := true
+        } else {
+          cur_cost := cost_data_get(cost, cur_key)
+
+          // DIRS: four cardinal direction steps (dx, dy).
+          // Defined inside the else block (created fresh each iteration)
+          // so the for-loop below can consume it without moving a shared binding.
+          // See language note (4) in file header.
+          dirs := @[(0, 1), (0, -1), (1, 0), (-1, 0)]
+          for dir in dirs do {
+            dx, dy := dir
+            nx := cx + dx
+            ny := cy + dy
+
+            // Allow stepping onto the goal even if it is blocked —
+            // goal cells sit on node borders which are marked blocked.
+            passable := (nx == ex and ny == ey) or grid_is_free(grid, nx, ny)
+            if (passable) do {
+              new_cost := cur_cost + 1
+              ni       := pos_to_key(nx, ny, gw)
+              old_cost := cost_data_get(cost, ni)
+              if (old_cost == -1 or new_cost < old_cost) do {
+                cost_data_set(cost, ni, new_cost)
+                cost_data_set(prev, ni, cur_key)
+                pri := new_cost + heuristic(nx, ny, ex, ey)
+                heap_push(h, pri, key_to_str(ni))
+              }
+            }
+          }
+        }
+      }
+      none => { done := true }
+    }
+  }
+
+  if (found == false) do {
+    point_list_new()   // empty PointList signals "no path found"
+  } else {
+    // Reconstruct path by walking backwards from end to start.
+    pd    := point_list_new()
+    cx    := ex
+    cy    := ey
+    going := true
+    while (going) do {
+      point_list_push(pd, cx, cy)
+      idx := pos_to_key(cx, cy, gw)
+      par := cost_data_get(prev, idx)
+      if (par == -2) do {
+        going := false
+      } else {
+        cx := key_to_x(par, gw)
+        cy := key_to_y(par, gw)
+      }
+    }
+    // pd is end→start order; return reversed so result is start→end.
+    point_list_reversed(pd)
+  }
+}
+
+// ── simplify_path ─────────────────────────────────────────────────────────────
+// Remove collinear intermediate waypoints, keeping only direction-change points.
+// Input and output are PointLists in start→end order.
+//
+// Paths with 0, 1, or 2 points are returned as independent copies unchanged.
+//
+// For each interior point i (1 ≤ i ≤ n-2):
+//   dx1 = path[i].x − path[i-1].x  (incoming direction)
+//   dy1 = path[i].y − path[i-1].y
+//   dx2 = path[i+1].x − path[i].x  (outgoing direction)
+//   dy2 = path[i+1].y − path[i].y
+//   Keep point only when (dx1 != dx2 or dy1 != dy2).
+
+simplify_path := (path: PointList) -> PointList {
+  n := point_list_len(path)
+  if (n <= 2) do {
+    point_list_copy(path)
+  } else {
+    result := point_list_new()
+    // Always include the first point.
+    x0 := point_list_get_x(path, 0)
+    y0 := point_list_get_y(path, 0)
+    point_list_push(result, x0, y0)
+    // Examine each interior point.
+    i := 1
+    while (i < n - 1) do {
+      px  := point_list_get_x(path, i - 1)
+      py  := point_list_get_y(path, i - 1)
+      cx  := point_list_get_x(path, i)
+      cy  := point_list_get_y(path, i)
+      nxi := point_list_get_x(path, i + 1)
+      nyi := point_list_get_y(path, i + 1)
+      dx1 := cx - px
+      dy1 := cy - py
+      dx2 := nxi - cx
+      dy2 := nyi - cy
+      if (dx1 != dx2 or dy1 != dy2) do {
+        point_list_push(result, cx, cy)
+      }
+      i := i + 1
+    }
+    // Always include the last point.
+    xn := point_list_get_x(path, n - 1)
+    yn := point_list_get_y(path, n - 1)
+    point_list_push(result, xn, yn)
+    result
+  }
+}

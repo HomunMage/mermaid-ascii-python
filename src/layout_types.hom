@@ -1,0 +1,149 @@
+// layout_types.hom — Layout IR shared between the layout engine and renderer
+//
+// Constants: dummy_prefix, compound_prefix
+// Structs:   Point, SubgraphMember, LayoutNode, RoutedEdge, LayoutResult
+// Constructors: point_new, layout_node_new, routed_edge_new,
+//               layout_result_new, layout_result_full
+
+use types
+
+// ── Prefix constants ───────────────────────────────────────────────────────────
+// These prefixes mark synthetic nodes inserted during layout.
+
+dummy_prefix := "__dummy_"
+compound_prefix := "__sg_"
+
+// ── Point ─────────────────────────────────────────────────────────────────────
+// A 2D point in character-grid coordinates (column, row).
+
+Point := struct { x: int, y: int }
+
+point_new := (x: int, y: int) -> Point {
+  Point { x: x, y: y }
+}
+
+// ── LayoutNode ────────────────────────────────────────────────────────────────
+// A node after the full Sugiyama layout pass — carries grid position and size.
+//
+// layer:  Sugiyama layer index (0 = top for TD, 0 = left for LR)
+// order:  left-to-right order within the layer (after crossing minimisation)
+// x, y:   top-left corner in character-grid coordinates
+// width, height: bounding box in character cells (includes box borders)
+
+LayoutNode := struct {
+  id: str,
+  layer: int,
+  order: int,
+  x: int,
+  y: int,
+  width: int,
+  height: int,
+  label: str,
+  shape: NodeShape
+}
+
+// Create a LayoutNode with an empty label and Rectangle shape.
+layout_node_new := (id: str, layer: int, order: int, x: int, y: int, width: int, height: int) -> LayoutNode {
+  LayoutNode {
+    id: id,
+    layer: layer,
+    order: order,
+    x: x,
+    y: y,
+    width: width,
+    height: height,
+    label: "",
+    shape: NodeShape.Rectangle
+  }
+}
+
+// Create a LayoutNode with explicit label and shape.
+layout_node_full := (id: str, layer: int, order: int, x: int, y: int, width: int, height: int, label: str, shape: NodeShape) -> LayoutNode {
+  LayoutNode {
+    id: id,
+    layer: layer,
+    order: order,
+    x: x,
+    y: y,
+    width: width,
+    height: height,
+    label: label,
+    shape: shape
+  }
+}
+
+// ── RoutedEdge ────────────────────────────────────────────────────────────────
+// An edge after A* routing — carries the full orthogonal waypoint path.
+//
+// waypoints: ordered list of Point, from source exit to target entry
+// label:     none if no label was specified in the source Mermaid
+
+RoutedEdge := struct {
+  from_id: str,
+  to_id: str,
+  label: str,        // optional: none if no label
+  edge_type: EdgeType,
+  waypoints: @[]     // list of Point
+}
+
+routed_edge_new := (from_id: str, to_id: str, label: str, edge_type: EdgeType, waypoints: @[]) -> RoutedEdge {
+  RoutedEdge {
+    from_id: from_id,
+    to_id: to_id,
+    label: label,
+    edge_type: edge_type,
+    waypoints: waypoints
+  }
+}
+
+// ── SubgraphMember ────────────────────────────────────────────────────────────
+// Associates a subgraph name with its direct member node ids.
+// Used in LayoutResult to carry subgraph membership for the renderer.
+
+SubgraphMember := struct {
+  name: str,
+  members: @[]    // list of str (node ids)
+}
+
+subgraph_member_new := (name: str, members: @[]) -> SubgraphMember {
+  SubgraphMember { name: name, members: members }
+}
+
+// ── LayoutResult ──────────────────────────────────────────────────────────────
+// Self-contained output of the layout phase — everything the renderer needs.
+//
+// nodes:                   all LayoutNode entries (real + compound, no dummies)
+// edges:                   all RoutedEdge entries with computed waypoints
+// direction:               effective Direction after any config override
+// subgraph_members:        list of SubgraphMember (name → [member_ids])
+// subgraph_descriptions:   dict str → str  (subgraph name → description text)
+
+LayoutResult := struct {
+  nodes: @[],                              // list of LayoutNode
+  edges: @[],                              // list of RoutedEdge
+  direction: Direction,
+  subgraph_members: @[],                   // list of SubgraphMember
+  subgraph_descriptions: @{str: str}       // dict str → str
+}
+
+// Create a LayoutResult with empty subgraph metadata.
+layout_result_new := (nodes: @[], edges: @[], direction: Direction) -> LayoutResult {
+  LayoutResult {
+    nodes: nodes,
+    edges: edges,
+    direction: direction,
+    subgraph_members: @[],
+    subgraph_descriptions: @{}
+  }
+}
+
+// Create a LayoutResult with all fields explicit.
+layout_result_full := (nodes: @[], edges: @[], direction: Direction, subgraph_members: @[], subgraph_descriptions: @{str: str}) -> LayoutResult {
+  LayoutResult {
+    nodes: nodes,
+    edges: edges,
+    direction: direction,
+    subgraph_members: subgraph_members,
+    subgraph_descriptions: subgraph_descriptions
+  }
+}

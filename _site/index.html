@@ -167,9 +167,13 @@ graph TD
 
 			async function load() {
 				try {
-					await init();
+					const [, verResp] = await Promise.all([
+						init(),
+						fetch('version.txt').catch(() => null)
+					]);
 					ready = true;
-					status.textContent = 'Ready';
+					const ver = (verResp && verResp.ok) ? (await verResp.text()).trim() : '';
+					status.textContent = ver ? `mermaid-ascii ${ver}` : 'Ready';
 					status.style.fontStyle = 'normal';
 					doRender();
 				} catch (e) {

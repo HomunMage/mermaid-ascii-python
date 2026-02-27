@@ -1,0 +1,212 @@
+// charset.hom — Character sets and junction merging for box-drawing
+//
+// Enums:     CharSet
+// Structs:   BoxChars, Arms
+// Functions: box_chars_unicode, box_chars_ascii, box_chars_for_charset,
+//            box_chars_rounded, box_chars_diamond, box_chars_circle,
+//            arms_new, arms_from_char, arms_merge, arms_to_char
+
+use std
+
+// ── CharSet ───────────────────────────────────────────────────────────────────
+// Unicode: use Unicode box-drawing characters (┌, ─, │, etc.)
+// Ascii:   use plain ASCII characters (+, -, |)
+
+CharSet := enum { Unicode, Ascii }
+
+// ── BoxChars ──────────────────────────────────────────────────────────────────
+// Complete set of box-drawing characters for a given style.
+// Corners (4): top_left, top_right, bottom_left, bottom_right
+// Edges (2):   horizontal, vertical
+// Tees (4):    tee_right (├), tee_left (┤), tee_down (┬), tee_up (┴)
+// Cross (1):   cross (┼)
+// Arrows (4):  arrow_right, arrow_left, arrow_down, arrow_up
+//              Total: 15 fields
+
+BoxChars := struct {
+  top_left:     str,
+  top_right:    str,
+  bottom_left:  str,
+  bottom_right: str,
+  horizontal:   str,
+  vertical:     str,
+  tee_right:    str,
+  tee_left:     str,
+  tee_down:     str,
+  tee_up:       str,
+  cross:        str,
+  arrow_right:  str,
+  arrow_left:   str,
+  arrow_down:   str,
+  arrow_up:     str
+}
+
+// Return a BoxChars set using Unicode box-drawing characters.
+box_chars_unicode := () -> BoxChars {
+  BoxChars {
+    top_left:     "┌",
+    top_right:    "┐",
+    bottom_left:  "└",
+    bottom_right: "┘",
+    horizontal:   "─",
+    vertical:     "│",
+    tee_right:    "├",
+    tee_left:     "┤",
+    tee_down:     "┬",
+    tee_up:       "┴",
+    cross:        "┼",
+    arrow_right:  "►",
+    arrow_left:   "◄",
+    arrow_down:   "▼",
+    arrow_up:     "▲"
+  }
+}
+
+// Return a BoxChars set using plain ASCII characters.
+box_chars_ascii := () -> BoxChars {
+  BoxChars {
+    top_left:     "+",
+    top_right:    "+",
+    bottom_left:  "+",
+    bottom_right: "+",
+    horizontal:   "-",
+    vertical:     "|",
+    tee_right:    "+",
+    tee_left:     "+",
+    tee_down:     "+",
+    tee_up:       "+",
+    cross:        "+",
+    arrow_right:  ">",
+    arrow_left:   "<",
+    arrow_down:   "v",
+    arrow_up:     "^"
+  }
+}
+
+// Return the standard BoxChars for the given CharSet.
+box_chars_for_charset := (cs: CharSet) -> BoxChars {
+  match cs {
+    CharSet.Unicode => box_chars_unicode()
+    CharSet.Ascii   => box_chars_ascii()
+  }
+}
+
+// Rounded corners variant: ╭╮╰╯ in Unicode; falls back to plain ASCII.
+box_chars_rounded := (cs: CharSet) -> BoxChars {
+  if (cs == CharSet.Ascii) do {
+    box_chars_ascii()
+  } else {
+    bc := box_chars_unicode()
+    bc.top_left     := "╭"
+    bc.top_right    := "╮"
+    bc.bottom_left  := "╰"
+    bc.bottom_right := "╯"
+    bc
+  }
+}
+
+// Diamond corners variant: uses / and \ instead of box corners.
+box_chars_diamond := (cs: CharSet) -> BoxChars {
+  bc := box_chars_for_charset(cs)
+  bc.top_left     := "/"
+  bc.top_right    := "\\"
+  bc.bottom_left  := "\\"
+  bc.bottom_right := "/"
+  bc
+}
+
+// Circle corners variant: uses ( and ) for corners; vertical side is a space.
+box_chars_circle := (cs: CharSet) -> BoxChars {
+  bc := box_chars_for_charset(cs)
+  bc.top_left     := "("
+  bc.top_right    := ")"
+  bc.bottom_left  := "("
+  bc.bottom_right := ")"
+  bc.vertical     := " "
+  bc
+}
+
+// ── Arms ──────────────────────────────────────────────────────────────────────
+// Represents which directional arms of a junction cell are active.
+// Used to merge overlapping box-drawing characters at intersection points.
+
+Arms := struct {
+  up:    bool,
+  down:  bool,
+  left:  bool,
+  right: bool
+}
+
+// Construct an Arms value with explicit arm flags.
+arms_new := (up: bool, down: bool, left: bool, right: bool) -> Arms {
+  Arms { up: up, down: down, left: left, right: right }
+}
+
+// Decode a box-drawing character into its Arms.
+// Returns none for characters that are not recognised junction characters.
+arms_from_char := (c: str) -> Arms {
+  match c {
+    "─" => arms_new(false, false, true,  true)
+    "-" => arms_new(false, false, true,  true)
+    "│" => arms_new(true,  true,  false, false)
+    "|" => arms_new(true,  true,  false, false)
+    "┌" => arms_new(false, true,  false, true)
+    "┐" => arms_new(false, true,  true,  false)
+    "└" => arms_new(true,  false, false, true)
+    "┘" => arms_new(true,  false, true,  false)
+    "├" => arms_new(true,  true,  false, true)
+    "┤" => arms_new(true,  true,  true,  false)
+    "┬" => arms_new(false, true,  true,  true)
+    "┴" => arms_new(true,  false, true,  true)
+    "┼" => arms_new(true,  true,  true,  true)
+    "+" => arms_new(true,  true,  true,  true)
+    _   => none
+  }
+}
+
+// Merge two Arms by OR-ing each direction flag.
+// The result has an arm wherever either input has an arm.
+arms_merge := (a: Arms, b: Arms) -> Arms {
+  Arms {
+    up:    a.up    || b.up,
+    down:  a.down  || b.down,
+    left:  a.left  || b.left,
+    right: a.right || b.right
+  }
+}
+
+// Encode Arms as a 4-bit integer for character dispatch.
+// Bit layout: up=8, down=4, left=2, right=1
+arms_key := (a: Arms) -> int {
+  u := if (a.up)    do { 8 } else { 0 }
+  d := if (a.down)  do { 4 } else { 0 }
+  l := if (a.left)  do { 2 } else { 0 }
+  r := if (a.right) do { 1 } else { 0 }
+  u + d + l + r
+}
+
+// Convert Arms to the appropriate box-drawing character string.
+// Selects the character from BoxChars based on which arms are active.
+arms_to_char := (a: Arms, cs: CharSet) -> str {
+  bc  := box_chars_for_charset(cs)
+  key := arms_key(a)
+  match key {
+    0  => " "
+    3  => bc.horizontal    // (F,F,T,T) — left + right
+    12 => bc.vertical      // (T,T,F,F) — up + down
+    5  => bc.top_left      // (F,T,F,T) — down + right  → ┌
+    6  => bc.top_right     // (F,T,T,F) — down + left   → ┐
+    9  => bc.bottom_left   // (T,F,F,T) — up + right    → └
+    10 => bc.bottom_right  // (T,F,T,F) — up + left     → ┘
+    13 => bc.tee_right     // (T,T,F,T) — up+down+right → ├
+    14 => bc.tee_left      // (T,T,T,F) — up+down+left  → ┤
+    7  => bc.tee_down      // (F,T,T,T) — down+l+r      → ┬
+    11 => bc.tee_up        // (T,F,T,T) — up+l+r        → ┴
+    15 => bc.cross         // (T,T,T,T) — all arms      → ┼
+    8  => bc.vertical      // (T,F,F,F) — up only
+    4  => bc.vertical      // (F,T,F,F) — down only
+    2  => bc.horizontal    // (F,F,T,F) — left only
+    1  => bc.horizontal    // (F,F,F,T) — right only
+    _  => " "
+  }
+}

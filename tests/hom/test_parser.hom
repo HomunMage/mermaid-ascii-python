@@ -1,0 +1,1042 @@
+// test_parser.hom — Tests for parser.hom (Part 1 + Part 2)
+//
+// Part 1 exercises: cursor_new, cursor_eof, cursor_peek, cursor_consume,
+//            cursor_skip_ws, cursor_skip_ws_and_newlines,
+//            cursor_match_node_id, cursor_match_direction,
+//            cursor_parse_quoted_string, cursor_parse_node_label,
+//            cursor_parse_node_shape, cursor_parse_node_ref,
+//            edge_patterns, cursor_parse_edge_connector
+// Part 2 exercises: cursor_consume_newline, cursor_try_parse_edge_label,
+//            cursor_parse_edge_chain, upsert_node,
+//            cursor_try_parse_edge_stmt, cursor_try_parse_node_stmt,
+//            cursor_at_end_keyword, cursor_parse_subgraph_label,
+//            cursor_try_parse_subgraph_direction,
+//            cursor_parse_subgraph_block, cursor_parse_graph,
+//            parse_flowchart
+
+use std
+use re
+use types
+use parser
+
+// ── Test helper ───────────────────────────────────────────────────────────────
+
+check := (cond: bool, msg: str) -> _ {
+  if (cond) do {
+    print("  ok: ${msg}")
+  } else {
+    print("FAIL: ${msg}")
+  }
+}
+
+// ── cursor_new + cursor_eof ───────────────────────────────────────────────────
+
+test_cursor_eof := () -> _ {
+  c1 := cursor_new("")
+  check(cursor_eof(c1), "empty cursor is eof")
+
+  c2 := cursor_new("hello")
+  check(!cursor_eof(c2), "non-empty cursor not eof at start")
+
+  c3 := cursor_new("hi")
+  c3.pos := 2
+  check(cursor_eof(c3), "cursor at end is eof")
+
+  c4 := cursor_new("hi")
+  c4.pos := 1
+  check(!cursor_eof(c4), "cursor before end not eof")
+}
+
+// ── cursor_peek ───────────────────────────────────────────────────────────────
+
+test_cursor_peek := () -> _ {
+  c := cursor_new("hello world")
+  check(cursor_peek(c, "hello"), "peek 'hello' at start -> true")
+  check(!cursor_peek(c, "world"), "peek 'world' at start -> false")
+  check(cursor_peek(c, "h"), "peek single char -> true")
+  check(!cursor_peek(c, "xyz"), "peek non-matching -> false")
+
+  // peek at mid-string position
+  c.pos := 6
+  check(cursor_peek(c, "world"), "peek 'world' at pos 6 -> true")
+  check(!cursor_peek(c, "hello"), "peek 'hello' at pos 6 -> false")
+}
+
+// ── cursor_consume ────────────────────────────────────────────────────────────
+
+test_cursor_consume := () -> _ {
+  c := cursor_new("hello world")
+  ok := cursor_consume(c, "hello")
+  check(ok, "consume 'hello' -> true")
+  check(c.pos == 5, "pos advanced to 5 after consuming 'hello'")
+
+  ok2 := cursor_consume(c, "xyz")
+  check(!ok2, "consume non-matching -> false")
+  check(c.pos == 5, "pos unchanged after failed consume")
+
+  ok3 := cursor_consume(c, " world")
+  check(ok3, "consume ' world' -> true")
+  check(cursor_eof(c), "cursor at eof after consuming all")
+}
+
+// ── cursor_skip_ws ────────────────────────────────────────────────────────────
+
+test_cursor_skip_ws_spaces := () -> _ {
+  c := cursor_new("   foo")
+  cursor_skip_ws(c)
+  check(c.pos == 3, "skip_ws skips 3 leading spaces")
+  check(cursor_peek(c, "foo"), "cursor now at 'foo'")
+}
+
+test_cursor_skip_ws_tabs := () -> _ {
+  c := cursor_new("\t\tfoo")
+  cursor_skip_ws(c)
+  check(c.pos == 2, "skip_ws skips 2 leading tabs")
+}
+
+test_cursor_skip_ws_comment := () -> _ {
+  // %% comment up to (but not including) the newline
+  c := cursor_new("%% this is a comment\nfoo")
+  cursor_skip_ws(c)
+  // pos should be right after the comment (before the newline)
+  check(cursor_peek(c, "\n"), "skip_ws stops at newline after comment")
+}
+
+test_cursor_skip_ws_mixed := () -> _ {
+  // spaces then comment then (newline is NOT skipped by skip_ws)
+  c := cursor_new("  %% comment\nbar")
+  cursor_skip_ws(c)
+  check(cursor_peek(c, "\n"), "skip_ws skips spaces+comment, stops at newline")
+}
+
+test_cursor_skip_ws_nothing := () -> _ {
+  c := cursor_new("foo")
+  cursor_skip_ws(c)
+  check(c.pos == 0, "skip_ws on no-whitespace leaves pos unchanged")
+}
+
+// ── cursor_skip_ws_and_newlines ───────────────────────────────────────────────
+
+test_cursor_skip_ws_and_newlines_basic := () -> _ {
+  c := cursor_new("  \n  foo")
+  cursor_skip_ws_and_newlines(c)
+  check(cursor_peek(c, "foo"), "skip_ws_and_newlines reaches 'foo'")
+}
+
+test_cursor_skip_ws_and_newlines_multi := () -> _ {
+  c := cursor_new("\n\n\nfoo")
+  cursor_skip_ws_and_newlines(c)
+  check(cursor_peek(c, "foo"), "skip multiple newlines")
+}
+
+test_cursor_skip_ws_and_newlines_crlf := () -> _ {
+  c := cursor_new("\r\nfoo")
+  cursor_skip_ws_and_newlines(c)
+  check(cursor_peek(c, "foo"), "skip \\r\\n (CRLF) newline")
+}
+
+// ── cursor_match_node_id ──────────────────────────────────────────────────────
+
+test_cursor_match_node_id_basic := () -> _ {
+  c := cursor_new("myNode123 rest")
+  id := cursor_match_node_id(c)
+  check(id == "myNode123", "match_node_id returns 'myNode123'")
+  check(c.pos == 9, "pos advanced to 9")
+}
+
+test_cursor_match_node_id_underscore := () -> _ {
+  c := cursor_new("_private")
+  id := cursor_match_node_id(c)
+  check(id == "_private", "match_node_id handles underscore prefix")
+}
+
+test_cursor_match_node_id_with_dash := () -> _ {
+  c := cursor_new("my-node")
+  id := cursor_match_node_id(c)
+  check(id == "my-node", "match_node_id includes hyphens in body")
+}
+
+test_cursor_match_node_id_no_match := () -> _ {
+  c := cursor_new("123abc")
+  id := cursor_match_node_id(c)
+  check(id == none, "match_node_id fails on digit-start")
+  check(c.pos == 0, "pos unchanged on no match")
+}
+
+test_cursor_match_node_id_empty := () -> _ {
+  c := cursor_new("")
+  id := cursor_match_node_id(c)
+  check(id == none, "match_node_id on empty string -> none")
+}
+
+// ── cursor_match_direction ────────────────────────────────────────────────────
+
+test_cursor_match_direction := () -> _ {
+  c1 := cursor_new("LR ")
+  d1 := cursor_match_direction(c1)
+  check(d1 == Direction.LR, "match_direction 'LR' -> Direction.LR")
+
+  c2 := cursor_new("TD ")
+  d2 := cursor_match_direction(c2)
+  check(d2 == Direction.TD, "match_direction 'TD' -> Direction.TD")
+
+  c3 := cursor_new("TB ")
+  d3 := cursor_match_direction(c3)
+  check(d3 == Direction.TD, "match_direction 'TB' normalised to Direction.TD")
+
+  c4 := cursor_new("RL ")
+  d4 := cursor_match_direction(c4)
+  check(d4 == Direction.RL, "match_direction 'RL' -> Direction.RL")
+
+  c5 := cursor_new("BT ")
+  d5 := cursor_match_direction(c5)
+  check(d5 == Direction.BT, "match_direction 'BT' -> Direction.BT")
+
+  c6 := cursor_new("foo")
+  d6 := cursor_match_direction(c6)
+  check(d6 == Direction.TD, "match_direction no-match defaults to TD")
+}
+
+// ── cursor_parse_quoted_string ────────────────────────────────────────────────
+
+test_cursor_parse_quoted_string_basic := () -> _ {
+  c := cursor_new("\"hello world\"")
+  s := cursor_parse_quoted_string(c)
+  check(s == "hello world", "quoted string: basic content")
+  check(cursor_eof(c), "cursor consumed whole quoted string")
+}
+
+test_cursor_parse_quoted_string_escape_newline := () -> _ {
+  c := cursor_new("\"line1\\nline2\"")
+  s := cursor_parse_quoted_string(c)
+  check(s == "line1\nline2", "quoted string: \\n escape -> newline")
+}
+
+test_cursor_parse_quoted_string_escape_quote := () -> _ {
+  c := cursor_new("\"say \\\"hi\\\"\"")
+  s := cursor_parse_quoted_string(c)
+  check(s == "say \"hi\"", "quoted string: escaped double-quote")
+}
+
+test_cursor_parse_quoted_string_escape_backslash := () -> _ {
+  c := cursor_new("\"a\\\\b\"")
+  s := cursor_parse_quoted_string(c)
+  check(s == "a\\b", "quoted string: escaped backslash")
+}
+
+test_cursor_parse_quoted_string_empty := () -> _ {
+  c := cursor_new("\"\"")
+  s := cursor_parse_quoted_string(c)
+  check(s == "", "quoted string: empty gives empty str")
+}
+
+// ── cursor_parse_node_shape ───────────────────────────────────────────────────
+
+test_cursor_parse_node_shape_rectangle := () -> _ {
+  c := cursor_new("[MyLabel]")
+  sp := cursor_parse_node_shape(c)
+  check(sp != none, "rectangle shape parsed")
+  check(sp.shape == NodeShape.Rectangle, "rectangle: correct shape")
+  check(sp.label == "MyLabel", "rectangle: correct label")
+  check(cursor_eof(c), "cursor consumed whole bracket")
+}
+
+test_cursor_parse_node_shape_rounded := () -> _ {
+  c := cursor_new("(RoundLabel)")
+  sp := cursor_parse_node_shape(c)
+  check(sp != none, "rounded shape parsed")
+  check(sp.shape == NodeShape.Rounded, "rounded: correct shape")
+  check(sp.label == "RoundLabel", "rounded: correct label")
+}
+
+test_cursor_parse_node_shape_diamond := () -> _ {
+  c := cursor_new("{DiamondLabel}")
+  sp := cursor_parse_node_shape(c)
+  check(sp != none, "diamond shape parsed")
+  check(sp.shape == NodeShape.Diamond, "diamond: correct shape")
+  check(sp.label == "DiamondLabel", "diamond: correct label")
+}
+
+test_cursor_parse_node_shape_circle := () -> _ {
+  c := cursor_new("((CircLabel))")
+  sp := cursor_parse_node_shape(c)
+  check(sp != none, "circle shape parsed")
+  check(sp.shape == NodeShape.Circle, "circle: correct shape")
+  check(sp.label == "CircLabel", "circle: correct label")
+}
+
+test_cursor_parse_node_shape_circle_not_rounded := () -> _ {
+  // (( must be treated as Circle, not Rounded + leftover (
+  c := cursor_new("((X))")
+  sp := cursor_parse_node_shape(c)
+  check(sp != none, "(( parsed as circle, not rounded")
+  check(sp.shape == NodeShape.Circle, "(( is circle shape")
+}
+
+test_cursor_parse_node_shape_none := () -> _ {
+  // No bracket at current position
+  c := cursor_new("plain")
+  sp := cursor_parse_node_shape(c)
+  check(sp == none, "no bracket -> none")
+  check(c.pos == 0, "pos unchanged when no shape")
+}
+
+test_cursor_parse_node_shape_quoted_label := () -> _ {
+  c := cursor_new("[\"Quoted Label\"]")
+  sp := cursor_parse_node_shape(c)
+  check(sp != none, "rectangle with quoted label parsed")
+  check(sp.label == "Quoted Label", "quoted label inside bracket")
+}
+
+// ── cursor_parse_node_ref ─────────────────────────────────────────────────────
+
+test_cursor_parse_node_ref_with_shape := () -> _ {
+  c := cursor_new("nodeA[Label A]")
+  n := cursor_parse_node_ref(c)
+  check(n != none, "node_ref with shape parsed")
+  check(n.id    == "nodeA",   "node id = nodeA")
+  check(n.label == "Label A", "node label = Label A")
+  check(n.shape == NodeShape.Rectangle, "node shape = Rectangle")
+}
+
+test_cursor_parse_node_ref_bare := () -> _ {
+  c := cursor_new("nodeB rest")
+  n := cursor_parse_node_ref(c)
+  check(n != none, "bare node_ref parsed")
+  check(n.id    == "nodeB", "bare node id = nodeB")
+  check(n.label == "nodeB", "bare node label equals id")
+  check(n.shape == NodeShape.Rectangle, "bare node shape defaults to Rectangle")
+  // pos should be right after 'nodeB' (before ' rest')
+  check(c.pos == 5, "pos advanced past identifier only")
+}
+
+test_cursor_parse_node_ref_diamond := () -> _ {
+  c := cursor_new("decision{Yes or No}")
+  n := cursor_parse_node_ref(c)
+  check(n != none, "diamond node_ref parsed")
+  check(n.id    == "decision",   "diamond node id")
+  check(n.shape == NodeShape.Diamond, "diamond node shape")
+  check(n.label == "Yes or No", "diamond node label")
+}
+
+test_cursor_parse_node_ref_circle := () -> _ {
+  c := cursor_new("end((Stop))")
+  n := cursor_parse_node_ref(c)
+  check(n != none, "circle node_ref parsed")
+  check(n.shape == NodeShape.Circle, "circle node shape")
+  check(n.label == "Stop", "circle node label")
+}
+
+test_cursor_parse_node_ref_none := () -> _ {
+  c := cursor_new("123invalid")
+  n := cursor_parse_node_ref(c)
+  check(n == none, "node_ref on digit-start -> none")
+  check(c.pos == 0, "pos unchanged when no ref")
+}
+
+test_cursor_parse_node_ref_leading_ws := () -> _ {
+  // Leading whitespace is skipped
+  c := cursor_new("  myNode")
+  n := cursor_parse_node_ref(c)
+  check(n != none, "node_ref skips leading whitespace")
+  check(n.id == "myNode", "node id after leading ws")
+}
+
+// ── edge_patterns ─────────────────────────────────────────────────────────────
+
+test_edge_patterns_count := () -> _ {
+  eps := edge_patterns()
+  check(len(eps) == 9, "edge_patterns returns 9 entries")
+}
+
+test_edge_patterns_first_longest := () -> _ {
+  // First pattern must be the longest: <-.->
+  eps := edge_patterns()
+  first := eps[0]
+  check(first.token == "<-.->", "first pattern is <-.->, longest")
+  check(first.etype == EdgeType.BidirDotted, "first pattern maps to BidirDotted")
+}
+
+test_edge_patterns_last_shortest := () -> _ {
+  // Last pattern is one of the shortest: ---
+  eps := edge_patterns()
+  last := eps[8]
+  check(last.token == "---", "last pattern is ---")
+  check(last.etype == EdgeType.Line, "last pattern maps to Line")
+}
+
+// ── cursor_parse_edge_connector ───────────────────────────────────────────────
+
+test_cursor_parse_edge_connector_arrow := () -> _ {
+  c := cursor_new("-->")
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.Arrow, "'--> ' -> Arrow")
+  check(cursor_eof(c), "cursor consumed '-->'")
+}
+
+test_cursor_parse_edge_connector_line := () -> _ {
+  c := cursor_new("---")
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.Line, "'---' -> Line")
+}
+
+test_cursor_parse_edge_connector_dotted_arrow := () -> _ {
+  c := cursor_new("-.->" )
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.DottedArrow, "'-.-> ' -> DottedArrow")
+}
+
+test_cursor_parse_edge_connector_bidir_dotted := () -> _ {
+  c := cursor_new("<-.->")
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.BidirDotted, "'<-.->' -> BidirDotted")
+}
+
+test_cursor_parse_edge_connector_bidir_arrow := () -> _ {
+  c := cursor_new("<-->")
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.BidirArrow, "'<-->' -> BidirArrow")
+}
+
+test_cursor_parse_edge_connector_thick_arrow := () -> _ {
+  c := cursor_new("==>")
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.ThickArrow, "'==>' -> ThickArrow")
+}
+
+test_cursor_parse_edge_connector_bidir_thick := () -> _ {
+  c := cursor_new("<==>")
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.BidirThick, "'<==>' -> BidirThick")
+}
+
+test_cursor_parse_edge_connector_no_match := () -> _ {
+  c := cursor_new("xyz")
+  et := cursor_parse_edge_connector(c)
+  check(et == none, "non-connector text -> none")
+  check(c.pos == 0, "pos unchanged when no connector")
+}
+
+test_cursor_parse_edge_connector_leading_ws := () -> _ {
+  // Leading whitespace is skipped
+  c := cursor_new("   -->")
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.Arrow, "connector with leading spaces -> Arrow")
+}
+
+test_cursor_parse_edge_connector_prefer_longer := () -> _ {
+  // <-.-> must be matched, not <-- (which isn't a pattern) or -->
+  c := cursor_new("<-.->")
+  et := cursor_parse_edge_connector(c)
+  check(et == EdgeType.BidirDotted, "longest-match: <-.-> beats shorter patterns")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Part 2 tests
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── cursor_consume_newline ────────────────────────────────────────────────────
+
+test_consume_newline_lf := () -> _ {
+  c := cursor_new("\nfoo")
+  ok := cursor_consume_newline(c)
+  check(ok,            "consume_newline '\\n' -> true")
+  check(c.pos == 1,    "pos advanced by 1 after \\n")
+  check(cursor_peek(c, "foo"), "cursor now at 'foo'")
+}
+
+test_consume_newline_crlf := () -> _ {
+  c := cursor_new("\r\nfoo")
+  ok := cursor_consume_newline(c)
+  check(ok,            "consume_newline '\\r\\n' -> true")
+  check(c.pos == 2,    "pos advanced by 2 after \\r\\n")
+}
+
+test_consume_newline_cr := () -> _ {
+  c := cursor_new("\rfoo")
+  ok := cursor_consume_newline(c)
+  check(ok, "consume_newline '\\r' alone -> true")
+  check(c.pos == 1, "pos advanced by 1 after \\r")
+}
+
+test_consume_newline_no_match := () -> _ {
+  c := cursor_new("foo\n")
+  ok := cursor_consume_newline(c)
+  check(!ok,           "consume_newline on non-newline -> false")
+  check(c.pos == 0,    "pos unchanged when no newline")
+}
+
+test_consume_newline_empty := () -> _ {
+  c := cursor_new("")
+  ok := cursor_consume_newline(c)
+  check(!ok, "consume_newline on empty -> false")
+}
+
+// ── cursor_try_parse_edge_label ───────────────────────────────────────────────
+
+test_try_parse_edge_label_basic := () -> _ {
+  c := cursor_new("|hello|")
+  lbl := cursor_try_parse_edge_label(c)
+  check(lbl == "hello",     "edge label: basic |hello|")
+  check(cursor_eof(c),      "cursor consumed whole |hello|")
+}
+
+test_try_parse_edge_label_with_spaces := () -> _ {
+  c := cursor_new("|foo bar|")
+  lbl := cursor_try_parse_edge_label(c)
+  check(lbl == "foo bar",   "edge label: |foo bar| with spaces")
+}
+
+test_try_parse_edge_label_trimmed := () -> _ {
+  c := cursor_new("|  padded  |")
+  lbl := cursor_try_parse_edge_label(c)
+  check(lbl == "padded",    "edge label: trimmed of surrounding spaces")
+}
+
+test_try_parse_edge_label_no_pipe := () -> _ {
+  c := cursor_new("-->" )
+  lbl := cursor_try_parse_edge_label(c)
+  check(lbl == none,        "edge label: no | -> none")
+  check(c.pos == 0,         "pos unchanged when no pipe")
+}
+
+test_try_parse_edge_label_leading_ws := () -> _ {
+  c := cursor_new("   |text|")
+  lbl := cursor_try_parse_edge_label(c)
+  check(lbl == "text",      "edge label: skips leading whitespace")
+}
+
+test_try_parse_edge_label_empty := () -> _ {
+  c := cursor_new("||")
+  lbl := cursor_try_parse_edge_label(c)
+  check(lbl == "",          "edge label: empty || -> empty string")
+}
+
+// ── cursor_parse_edge_chain ───────────────────────────────────────────────────
+
+test_parse_edge_chain_empty := () -> _ {
+  c := cursor_new("nodeA")
+  segs := cursor_parse_edge_chain(c)
+  check(len(segs) == 0, "edge chain: no connector -> empty")
+  check(c.pos == 0,     "edge chain: pos unchanged on empty")
+}
+
+test_parse_edge_chain_single := () -> _ {
+  c := cursor_new("--> nodeB")
+  segs := cursor_parse_edge_chain(c)
+  check(len(segs) == 1,              "edge chain: single segment")
+  check(segs[0].etype == EdgeType.Arrow, "edge chain: Arrow type")
+  check(segs[0].target.id == "nodeB", "edge chain: target id nodeB")
+  check(segs[0].label == none,       "edge chain: no label -> none")
+}
+
+test_parse_edge_chain_with_label := () -> _ {
+  c := cursor_new("--> |text| nodeC")
+  segs := cursor_parse_edge_chain(c)
+  check(len(segs) == 1,              "edge chain with label: one segment")
+  check(segs[0].label == "text",     "edge chain: label = 'text'")
+  check(segs[0].target.id == "nodeC", "edge chain: target = nodeC")
+}
+
+test_parse_edge_chain_multiple := () -> _ {
+  c := cursor_new("--> B --> C")
+  segs := cursor_parse_edge_chain(c)
+  check(len(segs) == 2,          "edge chain: two segments")
+  check(segs[0].target.id == "B", "segment 0 target = B")
+  check(segs[1].target.id == "C", "segment 1 target = C")
+}
+
+test_parse_edge_chain_mixed_types := () -> _ {
+  c := cursor_new("--> B --- C")
+  segs := cursor_parse_edge_chain(c)
+  check(len(segs) == 2,                  "edge chain: mixed types, two segments")
+  check(segs[0].etype == EdgeType.Arrow, "first seg: Arrow")
+  check(segs[1].etype == EdgeType.Line,  "second seg: Line")
+}
+
+// ── upsert_node ───────────────────────────────────────────────────────────────
+
+test_upsert_node_empty := () -> _ {
+  nodes := @[]
+  n := node_bare("A")
+  upsert_node(nodes, n)
+  check(len(nodes) == 1,        "upsert into empty list: 1 node")
+  check(nodes[0].id == "A",     "upserted node id = A")
+}
+
+test_upsert_node_dedup := () -> _ {
+  nodes := @[]
+  upsert_node(nodes, node_bare("A"))
+  upsert_node(nodes, node_bare("A"))
+  check(len(nodes) == 1,        "upsert duplicate: still 1 node")
+}
+
+test_upsert_node_first_wins := () -> _ {
+  nodes := @[]
+  n1 := node_new("A", "Label1", NodeShape.Rectangle)
+  n2 := node_new("A", "Label2", NodeShape.Diamond)
+  upsert_node(nodes, n1)
+  upsert_node(nodes, n2)
+  check(len(nodes) == 1,              "upsert first-wins: still 1 node")
+  check(nodes[0].label == "Label1",   "first definition wins: label = Label1")
+}
+
+test_upsert_node_different_ids := () -> _ {
+  nodes := @[]
+  upsert_node(nodes, node_bare("A"))
+  upsert_node(nodes, node_bare("B"))
+  upsert_node(nodes, node_bare("C"))
+  check(len(nodes) == 3,  "upsert 3 different ids -> 3 nodes")
+}
+
+// ── cursor_try_parse_edge_stmt ────────────────────────────────────────────────
+
+test_try_parse_edge_stmt_basic := () -> _ {
+  c := cursor_new("A --> B")
+  res := cursor_try_parse_edge_stmt(c)
+  check(res != none,          "edge stmt: parsed successfully")
+  check(len(res.nodes) == 2,  "edge stmt: 2 nodes")
+  check(len(res.edges) == 1,  "edge stmt: 1 edge")
+  check(res.nodes[0].id == "A", "node 0 = A")
+  check(res.nodes[1].id == "B", "node 1 = B")
+  check(res.edges[0].from_id == "A", "edge from = A")
+  check(res.edges[0].to_id   == "B", "edge to = B")
+  check(res.edges[0].edge_type == EdgeType.Arrow, "edge type = Arrow")
+}
+
+test_try_parse_edge_stmt_with_label := () -> _ {
+  c := cursor_new("A --> |yes| B")
+  res := cursor_try_parse_edge_stmt(c)
+  check(res != none,                  "edge stmt with label: parsed")
+  check(res.edges[0].label == "yes",  "edge label = 'yes'")
+}
+
+test_try_parse_edge_stmt_chained := () -> _ {
+  c := cursor_new("A --> B --> C")
+  res := cursor_try_parse_edge_stmt(c)
+  check(res != none,           "chained edge stmt: parsed")
+  check(len(res.nodes) == 3,   "chained: 3 nodes")
+  check(len(res.edges) == 2,   "chained: 2 edges")
+  check(res.edges[0].from_id == "A", "edge 0: A->B")
+  check(res.edges[0].to_id   == "B", "edge 0: A->B")
+  check(res.edges[1].from_id == "B", "edge 1: B->C")
+  check(res.edges[1].to_id   == "C", "edge 1: B->C")
+}
+
+test_try_parse_edge_stmt_no_connector := () -> _ {
+  c := cursor_new("A")
+  res := cursor_try_parse_edge_stmt(c)
+  check(res == none,    "edge stmt without connector -> none")
+  check(c.pos == 0,     "pos restored on failure")
+}
+
+test_try_parse_edge_stmt_no_source := () -> _ {
+  c := cursor_new("123 --> B")
+  res := cursor_try_parse_edge_stmt(c)
+  check(res == none,    "edge stmt with invalid source -> none")
+}
+
+test_try_parse_edge_stmt_shapes := () -> _ {
+  c := cursor_new("start[Begin] --> end((Stop))")
+  res := cursor_try_parse_edge_stmt(c)
+  check(res != none,                          "edge stmt with shapes: parsed")
+  check(res.nodes[0].shape == NodeShape.Rectangle, "source: Rectangle")
+  check(res.nodes[1].shape == NodeShape.Circle,    "target: Circle")
+  check(res.nodes[0].label == "Begin",        "source label = Begin")
+  check(res.nodes[1].label == "Stop",         "target label = Stop")
+}
+
+test_try_parse_edge_stmt_dotted := () -> _ {
+  c := cursor_new("A -.-> B")
+  res := cursor_try_parse_edge_stmt(c)
+  check(res != none,                             "dotted arrow: parsed")
+  check(res.edges[0].edge_type == EdgeType.DottedArrow, "edge type = DottedArrow")
+}
+
+// ── cursor_try_parse_node_stmt ────────────────────────────────────────────────
+
+test_try_parse_node_stmt_bare := () -> _ {
+  c := cursor_new("myNode")
+  n := cursor_try_parse_node_stmt(c)
+  check(n != none,          "node stmt: bare node parsed")
+  check(n.id == "myNode",   "node id = myNode")
+}
+
+test_try_parse_node_stmt_shaped := () -> _ {
+  c := cursor_new("box[A Label]")
+  n := cursor_try_parse_node_stmt(c)
+  check(n != none,                          "node stmt with shape: parsed")
+  check(n.id    == "box",                   "node id = box")
+  check(n.label == "A Label",              "node label = A Label")
+  check(n.shape == NodeShape.Rectangle,    "node shape = Rectangle")
+}
+
+test_try_parse_node_stmt_fail := () -> _ {
+  c := cursor_new("123bad")
+  n := cursor_try_parse_node_stmt(c)
+  check(n == none,      "node stmt on digit-start -> none")
+  check(c.pos == 0,     "pos unchanged on failure")
+}
+
+// ── cursor_at_end_keyword ─────────────────────────────────────────────────────
+
+test_at_end_keyword_alone := () -> _ {
+  c := cursor_new("end")
+  check(cursor_at_end_keyword(c), "'end' at EOF -> true")
+}
+
+test_at_end_keyword_followed_by_space := () -> _ {
+  c := cursor_new("end ")
+  check(cursor_at_end_keyword(c), "'end ' -> true (space is not id char)")
+}
+
+test_at_end_keyword_followed_by_newline := () -> _ {
+  c := cursor_new("end\n")
+  check(cursor_at_end_keyword(c), "'end\\n' -> true")
+}
+
+test_at_end_keyword_longer_id := () -> _ {
+  c := cursor_new("endNode")
+  check(!cursor_at_end_keyword(c), "'endNode' -> false")
+}
+
+test_at_end_keyword_hyphen_suffix := () -> _ {
+  c := cursor_new("end-more")
+  check(!cursor_at_end_keyword(c), "'end-more' -> false (hyphen is id char)")
+}
+
+test_at_end_keyword_no_match := () -> _ {
+  c := cursor_new("enx")
+  check(!cursor_at_end_keyword(c), "'enx' -> false")
+}
+
+test_at_end_keyword_empty := () -> _ {
+  c := cursor_new("")
+  check(!cursor_at_end_keyword(c), "empty string -> false")
+}
+
+// ── cursor_parse_subgraph_label ───────────────────────────────────────────────
+
+test_parse_subgraph_label_bare := () -> _ {
+  c := cursor_new("My Subgraph\n")
+  lbl := cursor_parse_subgraph_label(c)
+  check(lbl == "My Subgraph", "subgraph label: bare multi-word")
+}
+
+test_parse_subgraph_label_quoted := () -> _ {
+  c := cursor_new("\"Quoted Name\"\n")
+  lbl := cursor_parse_subgraph_label(c)
+  check(lbl == "Quoted Name", "subgraph label: quoted string")
+}
+
+test_parse_subgraph_label_trimmed := () -> _ {
+  c := cursor_new("  trimmed  \n")
+  lbl := cursor_parse_subgraph_label(c)
+  check(lbl == "trimmed", "subgraph label: trimmed of whitespace")
+}
+
+// ── cursor_try_parse_subgraph_direction ──────────────────────────────────────
+
+test_parse_subgraph_direction_lr := () -> _ {
+  c := cursor_new("direction LR\n")
+  d := cursor_try_parse_subgraph_direction(c)
+  check(d != none,          "subgraph direction: found")
+  check(d == Direction.LR,  "subgraph direction: LR")
+  check(cursor_eof(c),      "cursor consumed 'direction LR\\n'")
+}
+
+test_parse_subgraph_direction_td := () -> _ {
+  c := cursor_new("direction TD\n")
+  d := cursor_try_parse_subgraph_direction(c)
+  check(d == Direction.TD,  "subgraph direction: TD")
+}
+
+test_parse_subgraph_direction_none := () -> _ {
+  c := cursor_new("A --> B\n")
+  d := cursor_try_parse_subgraph_direction(c)
+  check(d == none,   "no 'direction' keyword -> none")
+  check(c.pos == 0,  "pos unchanged when no direction")
+}
+
+// ── cursor_parse_subgraph_block ───────────────────────────────────────────────
+
+test_parse_subgraph_basic := () -> _ {
+  c := cursor_new("subgraph MyGroup\nend\n")
+  sg := cursor_parse_subgraph_block(c)
+  check(sg != none,            "subgraph: parsed successfully")
+  check(sg.name == "MyGroup",  "subgraph name = MyGroup")
+  check(len(sg.nodes) == 0,    "subgraph: no nodes")
+}
+
+test_parse_subgraph_with_node := () -> _ {
+  c := cursor_new("subgraph Grp\nA\nend\n")
+  sg := cursor_parse_subgraph_block(c)
+  check(sg != none,         "subgraph with node: parsed")
+  check(len(sg.nodes) == 1, "subgraph: 1 node inside")
+  check(sg.nodes[0].id == "A", "inner node id = A")
+}
+
+test_parse_subgraph_with_edge := () -> _ {
+  c := cursor_new("subgraph Grp\nA --> B\nend\n")
+  sg := cursor_parse_subgraph_block(c)
+  check(sg != none,          "subgraph with edge: parsed")
+  check(len(sg.nodes) == 2,  "subgraph: 2 nodes from edge")
+  check(len(sg.edges) == 1,  "subgraph: 1 edge")
+}
+
+test_parse_subgraph_with_direction := () -> _ {
+  c := cursor_new("subgraph Grp\ndirection LR\nA --> B\nend\n")
+  sg := cursor_parse_subgraph_block(c)
+  check(sg != none,           "subgraph with direction: parsed")
+  check(sg.direction == Direction.LR, "subgraph direction = LR")
+}
+
+test_parse_subgraph_not_keyword := () -> _ {
+  // "subgraphFoo" is an identifier, not the subgraph keyword
+  c := cursor_new("subgraphFoo --> B\n")
+  sg := cursor_parse_subgraph_block(c)
+  check(sg == none,    "subgraphFoo is not a subgraph keyword")
+  check(c.pos == 0,    "pos restored when not a subgraph")
+}
+
+test_parse_subgraph_no_match := () -> _ {
+  c := cursor_new("A --> B\n")
+  sg := cursor_parse_subgraph_block(c)
+  check(sg == none,    "non-subgraph input -> none")
+  check(c.pos == 0,    "pos unchanged")
+}
+
+// ── cursor_parse_graph / parse_flowchart ─────────────────────────────────────
+
+test_parse_graph_empty := () -> _ {
+  c := cursor_new("")
+  g := cursor_parse_graph(c)
+  check(len(g.nodes) == 0,        "empty input: no nodes")
+  check(len(g.edges) == 0,        "empty input: no edges")
+  check(g.direction == Direction.TD, "empty input: default direction TD")
+}
+
+test_parse_flowchart_header_lr := () -> _ {
+  g := parse_flowchart("flowchart LR\nA --> B\n")
+  check(g.direction == Direction.LR, "flowchart LR: direction = LR")
+  check(len(g.nodes) == 2,          "flowchart LR: 2 nodes")
+  check(len(g.edges) == 1,          "flowchart LR: 1 edge")
+}
+
+test_parse_flowchart_header_td := () -> _ {
+  g := parse_flowchart("flowchart TD\nA --> B\n")
+  check(g.direction == Direction.TD, "flowchart TD: direction = TD")
+}
+
+test_parse_flowchart_graph_keyword := () -> _ {
+  g := parse_flowchart("graph LR\nA --> B\n")
+  check(g.direction == Direction.LR, "graph keyword: direction = LR")
+}
+
+test_parse_flowchart_node_shapes := () -> _ {
+  src := "flowchart TD\nstart[Start]\ndecision{Yes?}\nstop((End))\n"
+  g := parse_flowchart(src)
+  check(len(g.nodes) == 3, "node shapes: 3 nodes")
+}
+
+test_parse_flowchart_edge_label := () -> _ {
+  g := parse_flowchart("flowchart TD\nA --> |go| B\n")
+  check(len(g.edges) == 1,         "edge label: 1 edge")
+  check(g.edges[0].label == "go",  "edge label = 'go'")
+}
+
+test_parse_flowchart_chain := () -> _ {
+  g := parse_flowchart("flowchart TD\nA --> B --> C\n")
+  check(len(g.nodes) == 3, "chain: 3 nodes")
+  check(len(g.edges) == 2, "chain: 2 edges")
+}
+
+test_parse_flowchart_dedup_nodes := () -> _ {
+  // A appears twice (in two edges), should only be stored once
+  g := parse_flowchart("flowchart TD\nA --> B\nA --> C\n")
+  check(len(g.nodes) == 3, "dedup: A,B,C => 3 nodes (not 4)")
+}
+
+test_parse_flowchart_with_subgraph := () -> _ {
+  src := "flowchart TD\nsubgraph Group\nX --> Y\nend\n"
+  g := parse_flowchart(src)
+  check(len(g.subgraphs) == 1,    "with subgraph: 1 subgraph")
+  check(g.subgraphs[0].name == "Group", "subgraph name = Group")
+}
+
+test_parse_flowchart_no_header := () -> _ {
+  // No header defaults to TD
+  g := parse_flowchart("A --> B\n")
+  check(g.direction == Direction.TD, "no header: defaults to TD")
+  check(len(g.nodes) == 2,          "no header: 2 nodes")
+}
+
+test_parse_flowchart_comment := () -> _ {
+  g := parse_flowchart("flowchart TD\n%% this is a comment\nA --> B\n")
+  check(len(g.nodes) == 2, "comment skipped: 2 nodes")
+  check(len(g.edges) == 1, "comment skipped: 1 edge")
+}
+
+// ── Run all tests ─────────────────────────────────────────────────────────────
+
+main := () -> _ {
+  print("=== test_parser Part 1 ===")
+
+  print("-- cursor_eof --")
+  test_cursor_eof()
+
+  print("-- cursor_peek --")
+  test_cursor_peek()
+
+  print("-- cursor_consume --")
+  test_cursor_consume()
+
+  print("-- cursor_skip_ws --")
+  test_cursor_skip_ws_spaces()
+  test_cursor_skip_ws_tabs()
+  test_cursor_skip_ws_comment()
+  test_cursor_skip_ws_mixed()
+  test_cursor_skip_ws_nothing()
+
+  print("-- cursor_skip_ws_and_newlines --")
+  test_cursor_skip_ws_and_newlines_basic()
+  test_cursor_skip_ws_and_newlines_multi()
+  test_cursor_skip_ws_and_newlines_crlf()
+
+  print("-- cursor_match_node_id --")
+  test_cursor_match_node_id_basic()
+  test_cursor_match_node_id_underscore()
+  test_cursor_match_node_id_with_dash()
+  test_cursor_match_node_id_no_match()
+  test_cursor_match_node_id_empty()
+
+  print("-- cursor_match_direction --")
+  test_cursor_match_direction()
+
+  print("-- cursor_parse_quoted_string --")
+  test_cursor_parse_quoted_string_basic()
+  test_cursor_parse_quoted_string_escape_newline()
+  test_cursor_parse_quoted_string_escape_quote()
+  test_cursor_parse_quoted_string_escape_backslash()
+  test_cursor_parse_quoted_string_empty()
+
+  print("-- cursor_parse_node_shape --")
+  test_cursor_parse_node_shape_rectangle()
+  test_cursor_parse_node_shape_rounded()
+  test_cursor_parse_node_shape_diamond()
+  test_cursor_parse_node_shape_circle()
+  test_cursor_parse_node_shape_circle_not_rounded()
+  test_cursor_parse_node_shape_none()
+  test_cursor_parse_node_shape_quoted_label()
+
+  print("-- cursor_parse_node_ref --")
+  test_cursor_parse_node_ref_with_shape()
+  test_cursor_parse_node_ref_bare()
+  test_cursor_parse_node_ref_diamond()
+  test_cursor_parse_node_ref_circle()
+  test_cursor_parse_node_ref_none()
+  test_cursor_parse_node_ref_leading_ws()
+
+  print("-- edge_patterns --")
+  test_edge_patterns_count()
+  test_edge_patterns_first_longest()
+  test_edge_patterns_last_shortest()
+
+  print("-- cursor_parse_edge_connector --")
+  test_cursor_parse_edge_connector_arrow()
+  test_cursor_parse_edge_connector_line()
+  test_cursor_parse_edge_connector_dotted_arrow()
+  test_cursor_parse_edge_connector_bidir_dotted()
+  test_cursor_parse_edge_connector_bidir_arrow()
+  test_cursor_parse_edge_connector_thick_arrow()
+  test_cursor_parse_edge_connector_bidir_thick()
+  test_cursor_parse_edge_connector_no_match()
+  test_cursor_parse_edge_connector_leading_ws()
+  test_cursor_parse_edge_connector_prefer_longer()
+
+  print("=== test_parser Part 2 ===")
+
+  print("-- cursor_consume_newline --")
+  test_consume_newline_lf()
+  test_consume_newline_crlf()
+  test_consume_newline_cr()
+  test_consume_newline_no_match()
+  test_consume_newline_empty()
+
+  print("-- cursor_try_parse_edge_label --")
+  test_try_parse_edge_label_basic()
+  test_try_parse_edge_label_with_spaces()
+  test_try_parse_edge_label_trimmed()
+  test_try_parse_edge_label_no_pipe()
+  test_try_parse_edge_label_leading_ws()
+  test_try_parse_edge_label_empty()
+
+  print("-- cursor_parse_edge_chain --")
+  test_parse_edge_chain_empty()
+  test_parse_edge_chain_single()
+  test_parse_edge_chain_with_label()
+  test_parse_edge_chain_multiple()
+  test_parse_edge_chain_mixed_types()
+
+  print("-- upsert_node --")
+  test_upsert_node_empty()
+  test_upsert_node_dedup()
+  test_upsert_node_first_wins()
+  test_upsert_node_different_ids()
+
+  print("-- cursor_try_parse_edge_stmt --")
+  test_try_parse_edge_stmt_basic()
+  test_try_parse_edge_stmt_with_label()
+  test_try_parse_edge_stmt_chained()
+  test_try_parse_edge_stmt_no_connector()
+  test_try_parse_edge_stmt_no_source()
+  test_try_parse_edge_stmt_shapes()
+  test_try_parse_edge_stmt_dotted()
+
+  print("-- cursor_try_parse_node_stmt --")
+  test_try_parse_node_stmt_bare()
+  test_try_parse_node_stmt_shaped()
+  test_try_parse_node_stmt_fail()
+
+  print("-- cursor_at_end_keyword --")
+  test_at_end_keyword_alone()
+  test_at_end_keyword_followed_by_space()
+  test_at_end_keyword_followed_by_newline()
+  test_at_end_keyword_longer_id()
+  test_at_end_keyword_hyphen_suffix()
+  test_at_end_keyword_no_match()
+  test_at_end_keyword_empty()
+
+  print("-- cursor_parse_subgraph_label --")
+  test_parse_subgraph_label_bare()
+  test_parse_subgraph_label_quoted()
+  test_parse_subgraph_label_trimmed()
+
+  print("-- cursor_try_parse_subgraph_direction --")
+  test_parse_subgraph_direction_lr()
+  test_parse_subgraph_direction_td()
+  test_parse_subgraph_direction_none()
+
+  print("-- cursor_parse_subgraph_block --")
+  test_parse_subgraph_basic()
+  test_parse_subgraph_with_node()
+  test_parse_subgraph_with_edge()
+  test_parse_subgraph_with_direction()
+  test_parse_subgraph_not_keyword()
+  test_parse_subgraph_no_match()
+
+  print("-- cursor_parse_graph / parse_flowchart --")
+  test_parse_graph_empty()
+  test_parse_flowchart_header_lr()
+  test_parse_flowchart_header_td()
+  test_parse_flowchart_graph_keyword()
+  test_parse_flowchart_node_shapes()
+  test_parse_flowchart_edge_label()
+  test_parse_flowchart_chain()
+  test_parse_flowchart_dedup_nodes()
+  test_parse_flowchart_with_subgraph()
+  test_parse_flowchart_no_header()
+  test_parse_flowchart_comment()
+
+  print("=== done ===")
+}

@@ -1,0 +1,870 @@
+// test_layout.hom — Tests for layout.hom Phases 1–4
+//
+// Exercises: greedy_fas_ordering, remove_cycles, assign_layers,
+//            insert_dummy_nodes, minimise_crossings
+//
+// Notes:
+//   - No `use std` — layout.hom does not import std, and we don't need std
+//     functions (range, len, etc.) in these tests; print is a built-in.
+//   - `use test_dummy` sets has_rs_dep=true (skip_undef sema mode) so that
+//     functions from layout_state.rs and graph.rs are not flagged as undefined.
+//   - Graphs are built via mgraph_new/mgraph_add_node_full/mgraph_add_edge_full/
+//     mgraph_build from layout_state.rs — required because .hom codegen wraps
+//     all Var arguments with .clone(), losing mutations on plain HashMap/Vec.
+//     Rc<RefCell<Graph>> means .clone() is a pointer-bump preserving the same
+//     underlying data.
+//   - String literals in function call arguments are automatically appended with
+//     .to_string() by homunc codegen (clone_arg: Str(s) => "...".to_string()).
+//     So mgraph_add_node_full(mg, "A", "A", "Rectangle") is valid .hom.
+//   - str_list_get returns String; comparing String == "A" (i.e., String ==
+//     &str) uses impl PartialEq<str> for String which is valid in Rust.
+//
+// Compile + run (copy the following files to the same temp directory first):
+//   layout.hom, layout_state.rs, graph.rs, grid_data.rs, test_dummy.rs
+// Then:
+//   homunc test_layout.hom -o /tmp/test_layout.rs
+//   rustc --edition 2021 /tmp/test_layout.rs \
+//         -L $(cargo metadata --format-version 1 | jq -r '.target_directory')/debug/deps \
+//         --extern petgraph=$(ls target/debug/deps/libpetgraph*.rlib | head -1) \
+//         -o /tmp/test_layout && /tmp/test_layout
+
+use layout
+use test_dummy
+
+// ── Test helper ───────────────────────────────────────────────────────────────
+// check(cond, msg) prints "  ok: msg" on success and "FAIL: msg" on failure.
+// String literals in the msg argument are .to_string()'d by codegen.
+
+check := (cond: bool, msg: str) -> _ {
+  if (cond) do {
+    print("  ok: ${msg}")
+  } else {
+    print("FAIL: ${msg}")
+  }
+}
+
+// ── Graph builder helpers ─────────────────────────────────────────────────────
+// Build test graphs using layout_state.rs MutableGraph wrappers.
+// Direct mut-ref style (graph_add_node(&mut g, ...)) is not callable from .hom
+// because the codegen emits g.clone() as the first argument, which produces a
+// temporary copy.  mgraph_new() / mgraph_build() use Rc<RefCell<Graph>> so
+// mutations are visible through all clones.
+
+make_empty_graph := () -> Graph {
+  mg := mgraph_new()
+  mgraph_build(mg)
+}
+
+make_single_node := () -> Graph {
+  // One node "A", no edges.
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_build(mg)
+}
+
+make_chain := () -> Graph {
+  // A→B→C linear DAG.
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_node_full(mg, "B", "B", "Rectangle")
+  mgraph_add_node_full(mg, "C", "C", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "B", "Arrow", "")
+  mgraph_add_edge_full(mg, "B", "C", "Arrow", "")
+  mgraph_build(mg)
+}
+
+make_ab_dag := () -> Graph {
+  // A→B simple two-node DAG, no cycle.
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_node_full(mg, "B", "B", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "B", "Arrow", "")
+  mgraph_build(mg)
+}
+
+make_self_loop := () -> Graph {
+  // A→A self-loop (a trivial cycle).
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "A", "Arrow", "")
+  mgraph_build(mg)
+}
+
+make_cycle_ab := () -> Graph {
+  // A→B and B→A — two-node mutual cycle.
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_node_full(mg, "B", "B", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "B", "Arrow", "")
+  mgraph_add_edge_full(mg, "B", "A", "Arrow", "")
+  mgraph_build(mg)
+}
+
+make_cycle_abc := () -> Graph {
+  // A→B, B→C, C→A — three-node directed cycle.
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_node_full(mg, "B", "B", "Rectangle")
+  mgraph_add_node_full(mg, "C", "C", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "B", "Arrow", "")
+  mgraph_add_edge_full(mg, "B", "C", "Arrow", "")
+  mgraph_add_edge_full(mg, "C", "A", "Arrow", "")
+  mgraph_build(mg)
+}
+
+make_diamond := () -> Graph {
+  // A→B, A→C, B→D, C→D — diamond-shaped DAG.
+  // A is the unique source; D is the unique sink.
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_node_full(mg, "B", "B", "Rectangle")
+  mgraph_add_node_full(mg, "C", "C", "Rectangle")
+  mgraph_add_node_full(mg, "D", "D", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "B", "Arrow", "")
+  mgraph_add_edge_full(mg, "A", "C", "Arrow", "")
+  mgraph_add_edge_full(mg, "B", "D", "Arrow", "")
+  mgraph_add_edge_full(mg, "C", "D", "Arrow", "")
+  mgraph_build(mg)
+}
+
+
+// ── greedy_fas_ordering tests ─────────────────────────────────────────────────
+
+test_fas_empty := () -> _ {
+  // Empty graph → empty ordering.
+  g := make_empty_graph()
+  ordering := greedy_fas_ordering(g)
+  check(str_list_len(ordering) == 0, "fas: empty graph → length 0")
+}
+
+test_fas_single_node := () -> _ {
+  // One node "A" → ordering is ["A"].
+  g := make_single_node()
+  ordering := greedy_fas_ordering(g)
+  check(str_list_len(ordering) == 1, "fas: single node → length 1")
+  check(str_list_get(ordering, 0) == "A", "fas: single node → element 0 is A")
+}
+
+test_fas_chain_length := () -> _ {
+  // Three-node chain: ordering must contain all 3 nodes.
+  g := make_chain()
+  ordering := greedy_fas_ordering(g)
+  check(str_list_len(ordering) == 3, "fas: chain A→B→C → length 3")
+}
+
+test_fas_chain_order := () -> _ {
+  // In A→B→C each node becomes a sink one-at-a-time (C first, then B, then A),
+  // so s2 = [C, B, A].  str_list_extend_reversed appends reversed(s2) = [A,B,C]
+  // onto empty s1.  The final ordering is deterministically [A, B, C].
+  g := make_chain()
+  ordering := greedy_fas_ordering(g)
+  a := str_list_get(ordering, 0)
+  b := str_list_get(ordering, 1)
+  c := str_list_get(ordering, 2)
+  check(a == "A", "fas: chain → position 0 is A")
+  check(b == "B", "fas: chain → position 1 is B")
+  check(c == "C", "fas: chain → position 2 is C")
+}
+
+test_fas_ab_dag := () -> _ {
+  // Simple A→B: A is source (in_deg=0), B is sink (out_deg=0).
+  // FAS removes B first into s2 (sink), then A into s2.
+  // Reversed s2 = [A, B].
+  g := make_ab_dag()
+  ordering := greedy_fas_ordering(g)
+  check(str_list_len(ordering) == 2, "fas: A→B DAG → length 2")
+  first := str_list_get(ordering, 0)
+  second := str_list_get(ordering, 1)
+  check(first  == "A", "fas: A→B DAG → position 0 is A")
+  check(second == "B", "fas: A→B DAG → position 1 is B")
+}
+
+test_fas_two_node_cycle_length := () -> _ {
+  // A↔B: both nodes have equal FAS score (out-in = 0), so the tiebreak winner
+  // depends on HashSet iteration order and is non-deterministic.
+  // We only verify that the ordering contains all 2 nodes.
+  g := make_cycle_ab()
+  ordering := greedy_fas_ordering(g)
+  check(str_list_len(ordering) == 2, "fas: A↔B cycle → length 2")
+}
+
+test_fas_three_node_cycle_length := () -> _ {
+  // A→B→C→A: the FAS heuristic will break the cycle by placing one node first
+  // via the max(out-in) tiebreak.  The exact order is non-deterministic but all
+  // 3 nodes must appear.
+  g := make_cycle_abc()
+  ordering := greedy_fas_ordering(g)
+  check(str_list_len(ordering) == 3, "fas: 3-cycle A→B→C→A → length 3")
+}
+
+test_fas_diamond := () -> _ {
+  // Diamond A→B,C→D: A is the unique source, D is the unique sink.
+  // Regardless of B/C ordering, A must come first and D must come last.
+  //
+  // Trace: D has out_deg=0 → into s2 first.  Then B and C both become
+  // sinks; their relative order in s2 is non-deterministic, but A (the
+  // remaining source) goes next.  str_list_extend_reversed produces
+  // [A, {B or C}, {C or B}, D].
+  g := make_diamond()
+  ordering := greedy_fas_ordering(g)
+  check(str_list_len(ordering) == 4, "fas: diamond → length 4")
+  first := str_list_get(ordering, 0)
+  last  := str_list_get(ordering, 3)
+  check(first == "A", "fas: diamond → position 0 is A (unique source)")
+  check(last  == "D", "fas: diamond → position 3 is D (unique sink)")
+}
+
+
+// ── remove_cycles tests ───────────────────────────────────────────────────────
+
+test_rc_empty := () -> _ {
+  // Empty graph → (copy, empty reversed list).
+  g := make_empty_graph()
+  dag, reversed := remove_cycles(g)
+  check(edge_pair_list_len(reversed) == 0, "rc: empty → 0 reversed edges")
+  check(gw_node_count(dag)           == 0, "rc: empty → dag has 0 nodes")
+}
+
+test_rc_chain_dag := () -> _ {
+  // A→B→C is already a DAG; no edges should be reversed.
+  g := make_chain()
+  dag, reversed := remove_cycles(g)
+  check(edge_pair_list_len(reversed) == 0, "rc: chain DAG → 0 reversed")
+  check(gw_node_count(dag)           == 3, "rc: chain DAG → dag has 3 nodes")
+  edges := gw_edges_full(dag)
+  check(edge_info_len(edges)         == 2, "rc: chain DAG → dag has 2 edges")
+}
+
+test_rc_ab_dag := () -> _ {
+  // A→B simple DAG: no reversal, dag identical to original.
+  // Since A is position 0 and B is position 1 in the FAS ordering,
+  // the edge A→B (src_pos < tgt_pos) is NOT reversed.
+  g := make_ab_dag()
+  dag, reversed := remove_cycles(g)
+  check(edge_pair_list_len(reversed) == 0, "rc: A→B DAG → 0 reversed edges")
+  check(gw_node_count(dag)           == 2, "rc: A→B DAG → dag has 2 nodes")
+  edges := gw_edges_full(dag)
+  check(edge_info_len(edges)         == 1, "rc: A→B DAG → dag has 1 edge")
+  check(edge_info_src(edges, 0)      == "A", "rc: A→B DAG → edge src is A")
+  check(edge_info_tgt(edges, 0)      == "B", "rc: A→B DAG → edge tgt is B")
+}
+
+test_rc_self_loop := () -> _ {
+  // A→A self-loop: a self-loop is always a back-edge (src == tgt check).
+  // It is added to reversed and then SKIPPED when building dag edges
+  // (the `if (src != tgt)` guard in remove_cycles).
+  g := make_self_loop()
+  dag, reversed := remove_cycles(g)
+  check(edge_pair_list_len(reversed) == 1, "rc: self-loop → 1 reversed entry")
+  src := edge_pair_list_get_src(reversed, 0)
+  tgt := edge_pair_list_get_tgt(reversed, 0)
+  check(src == "A", "rc: self-loop reversed src is A")
+  check(tgt == "A", "rc: self-loop reversed tgt is A")
+  check(gw_node_count(dag)           == 1, "rc: self-loop → dag has 1 node")
+  edges := gw_edges_full(dag)
+  check(edge_info_len(edges)         == 0, "rc: self-loop → dag has 0 edges")
+}
+
+test_rc_two_node_cycle := () -> _ {
+  // A→B, B→A: exactly one edge is identified as a back-edge (whichever of
+  // A→B or B→A has the higher-position source in the FAS ordering).
+  //
+  // For ordering [A,B]: A→B is forward; B→A is reversed → reversed=[(B,A)].
+  //   The dag contains A→B (original) and A→B (from reversing B→A) → 2 edges.
+  // For ordering [B,A]: A→B is reversed; B→A is forward → reversed=[(A,B)].
+  //   The dag contains B→A (from reversing A→B) and B→A (original) → 2 edges.
+  //
+  // Either way: 1 reversed entry, 2 nodes in dag, 2 parallel edges in dag.
+  g := make_cycle_ab()
+  dag, reversed := remove_cycles(g)
+  check(edge_pair_list_len(reversed) == 1, "rc: A↔B → 1 reversed edge")
+  check(gw_node_count(dag)           == 2, "rc: A↔B → dag has 2 nodes")
+  edges := gw_edges_full(dag)
+  check(edge_info_len(edges)         == 2, "rc: A↔B → dag has 2 edges")
+}
+
+test_rc_three_node_cycle := () -> _ {
+  // A→B→C→A: the FAS ordering places one of the three edges as a back-edge.
+  // Exactly 1 edge is reversed; the dag retains all 3 nodes and 3 edges
+  // (the reversed edge is flipped in direction, not removed).
+  g := make_cycle_abc()
+  dag, reversed := remove_cycles(g)
+  check(edge_pair_list_len(reversed) == 1, "rc: 3-cycle → 1 reversed edge")
+  check(gw_node_count(dag)           == 3, "rc: 3-cycle → dag has 3 nodes")
+  edges := gw_edges_full(dag)
+  check(edge_info_len(edges)         == 3, "rc: 3-cycle → dag has 3 edges")
+}
+
+test_rc_diamond := () -> _ {
+  // Diamond A→B,A→C,B→D,C→D is a DAG; no edges should be reversed.
+  g := make_diamond()
+  dag, reversed := remove_cycles(g)
+  check(edge_pair_list_len(reversed) == 0, "rc: diamond DAG → 0 reversed")
+  check(gw_node_count(dag)           == 4, "rc: diamond DAG → dag has 4 nodes")
+  edges := gw_edges_full(dag)
+  check(edge_info_len(edges)         == 4, "rc: diamond DAG → dag has 4 edges")
+}
+
+
+// ── assign_layers tests ───────────────────────────────────────────────────────
+// Phase 2: longest-path layer assignment.
+//
+// For each test we build a small graph, call assign_layers, then inspect:
+//   la.layer_count   — total number of layers
+//   la.layers        — DegMap: node_id → layer index (via deg_map_get)
+//   la.reversed_edges — EdgePairList (via edge_pair_list_len)
+//
+// Note: accessing struct fields in .hom generates field.clone().
+//   For int fields (layer_count) that is a copy.
+//   For DegMap / EdgePairList fields (Rc<RefCell<...>>) it is a pointer bump —
+//   the clone still points to the same underlying data.  deg_map_get and
+//   edge_pair_list_len therefore see the correct values.
+
+test_al_empty := () -> _ {
+  // Empty graph → no nodes, layer_count = 1, no reversed edges.
+  g  := make_empty_graph()
+  la := assign_layers(g)
+  check(la.layer_count                      == 1, "al: empty → layer_count = 1")
+  check(edge_pair_list_len(la.reversed_edges) == 0, "al: empty → 0 reversed edges")
+}
+
+test_al_single_node := () -> _ {
+  // One node "A", no edges: A is assigned layer 0; layer_count = 1.
+  g  := make_single_node()
+  la := assign_layers(g)
+  check(la.layer_count                        == 1, "al: single → layer_count = 1")
+  check(deg_map_get(la.layers, "A")           == 0, "al: single → A at layer 0")
+  check(edge_pair_list_len(la.reversed_edges) == 0, "al: single → 0 reversed edges")
+}
+
+test_al_ab_dag := () -> _ {
+  // A→B: no cycles; A=0, B=1; layer_count = 2.
+  g  := make_ab_dag()
+  la := assign_layers(g)
+  check(la.layer_count                        == 2, "al: A→B → layer_count = 2")
+  check(deg_map_get(la.layers, "A")           == 0, "al: A→B → A at layer 0")
+  check(deg_map_get(la.layers, "B")           == 1, "al: A→B → B at layer 1")
+  check(edge_pair_list_len(la.reversed_edges) == 0, "al: A→B → 0 reversed edges")
+}
+
+test_al_chain := () -> _ {
+  // A→B→C: no cycles; A=0, B=1, C=2; layer_count = 3.
+  g  := make_chain()
+  la := assign_layers(g)
+  check(la.layer_count                        == 3, "al: chain → layer_count = 3")
+  check(deg_map_get(la.layers, "A")           == 0, "al: chain → A at layer 0")
+  check(deg_map_get(la.layers, "B")           == 1, "al: chain → B at layer 1")
+  check(deg_map_get(la.layers, "C")           == 2, "al: chain → C at layer 2")
+  check(edge_pair_list_len(la.reversed_edges) == 0, "al: chain → 0 reversed edges")
+}
+
+test_al_diamond := () -> _ {
+  // A→B, A→C, B→D, C→D: no cycles.
+  // Longest path A→B→D (or A→C→D) has length 2 → layer_count = 3.
+  // A=0, B=1, C=1, D=2.
+  g  := make_diamond()
+  la := assign_layers(g)
+  check(la.layer_count                        == 3, "al: diamond → layer_count = 3")
+  check(deg_map_get(la.layers, "A")           == 0, "al: diamond → A at layer 0")
+  check(deg_map_get(la.layers, "B")           == 1, "al: diamond → B at layer 1")
+  check(deg_map_get(la.layers, "C")           == 1, "al: diamond → C at layer 1")
+  check(deg_map_get(la.layers, "D")           == 2, "al: diamond → D at layer 2")
+  check(edge_pair_list_len(la.reversed_edges) == 0, "al: diamond → 0 reversed edges")
+}
+
+test_al_self_loop := () -> _ {
+  // A→A self-loop: recorded as reversed, removed from DAG.
+  // After remove_cycles: DAG has A with 0 edges → A stays at layer 0.
+  // layer_count = 1; reversed_edges has 1 entry (the self-loop).
+  g  := make_self_loop()
+  la := assign_layers(g)
+  check(la.layer_count                        == 1, "al: self-loop → layer_count = 1")
+  check(deg_map_get(la.layers, "A")           == 0, "al: self-loop → A at layer 0")
+  check(edge_pair_list_len(la.reversed_edges) == 1, "al: self-loop → 1 reversed entry")
+}
+
+test_al_two_node_cycle := () -> _ {
+  // A→B, B→A mutual cycle.
+  // remove_cycles reverses exactly one of the two edges.
+  // The resulting DAG either has two A→B edges or two B→A edges.
+  // Either way both nodes end up in different layers → layer_count = 2.
+  // Exactly 1 reversed entry.
+  g  := make_cycle_ab()
+  la := assign_layers(g)
+  check(la.layer_count                        == 2, "al: A↔B → layer_count = 2")
+  check(edge_pair_list_len(la.reversed_edges) == 1, "al: A↔B → 1 reversed edge")
+}
+
+test_al_three_node_cycle := () -> _ {
+  // A→B→C→A: one edge reversed; DAG retains 3 nodes and 3 directed edges.
+  // At least 2 distinct layers are produced (typically 3).
+  g  := make_cycle_abc()
+  la := assign_layers(g)
+  check(la.layer_count                         >= 2, "al: 3-cycle → layer_count >= 2")
+  check(edge_pair_list_len(la.reversed_edges)  == 1, "al: 3-cycle → 1 reversed edge")
+}
+
+
+// ── insert_dummy_nodes test graph builders ────────────────────────────────────
+// Graphs for Phase 3 tests — all DAGs (no cycles), so remove_cycles is a no-op.
+
+make_chain_with_skip := () -> Graph {
+  // A→B→C chain PLUS A→C skip edge.
+  // assign_layers → A=0, B=1, C=2.
+  // A→C has layer_diff=2 → 1 dummy node at layer 1.
+  // Edge insertion order: A→B (idx 0), B→C (idx 1), A→C (idx 2).
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_node_full(mg, "B", "B", "Rectangle")
+  mgraph_add_node_full(mg, "C", "C", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "B", "Arrow", "")
+  mgraph_add_edge_full(mg, "B", "C", "Arrow", "")
+  mgraph_add_edge_full(mg, "A", "C", "Arrow", "")
+  mgraph_build(mg)
+}
+
+make_chain_d_with_skip := () -> Graph {
+  // A→B→C→D chain PLUS A→D skip edge.
+  // assign_layers → A=0, B=1, C=2, D=3.
+  // A→D has layer_diff=3 → 2 dummy nodes at layers 1 and 2.
+  // Edge insertion order: A→B, B→C, C→D (indices 0,1,2), A→D (index 3).
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_node_full(mg, "B", "B", "Rectangle")
+  mgraph_add_node_full(mg, "C", "C", "Rectangle")
+  mgraph_add_node_full(mg, "D", "D", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "B", "Arrow", "")
+  mgraph_add_edge_full(mg, "B", "C", "Arrow", "")
+  mgraph_add_edge_full(mg, "C", "D", "Arrow", "")
+  mgraph_add_edge_full(mg, "A", "D", "Arrow", "")
+  mgraph_build(mg)
+}
+
+
+// ── insert_dummy_nodes tests ──────────────────────────────────────────────────
+// Phase 3: each test calls assign_layers + remove_cycles to get (la, dag), then
+// calls insert_dummy_nodes(dag, la) and inspects the AugmentedGraph fields.
+//
+// Struct field access in .hom clones the field:
+//   aug.layer_count  → int copy (cheap)
+//   aug.layers       → DegMap Rc clone (same underlying HashMap)
+//   aug.dummy_edges  → DummyEdgeList Rc clone (same underlying Vec)
+//   aug.graph        → Graph clone (full clone; used only with gw_node_count etc.)
+//
+// We use `dag, _ := remove_cycles(g)` since all test graphs are already DAGs.
+
+test_idn_empty := () -> _ {
+  // Empty graph → AugmentedGraph with 0 nodes, 0 dummy edges, layer_count=1.
+  g   := make_empty_graph()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+  check(aug.layer_count                      == 1, "idn: empty → layer_count = 1")
+  check(dummy_edge_list_len(aug.dummy_edges) == 0, "idn: empty → 0 dummy edge entries")
+  check(gw_node_count(aug.graph)             == 0, "idn: empty → aug graph has 0 nodes")
+}
+
+test_idn_single_node := () -> _ {
+  // Single node "A", no edges → no splits, layer_count=1.
+  g   := make_single_node()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+  check(aug.layer_count                      == 1, "idn: single → layer_count = 1")
+  check(dummy_edge_list_len(aug.dummy_edges) == 0, "idn: single → 0 dummy edge entries")
+  check(gw_node_count(aug.graph)             == 1, "idn: single → aug graph has 1 node")
+  aug_edges := gw_edges_full(aug.graph)
+  check(edge_info_len(aug_edges)             == 0, "idn: single → aug graph has 0 edges")
+}
+
+test_idn_ab_dag := () -> _ {
+  // A→B: layer_diff=1 → no dummy nodes; edge copied unchanged.
+  g   := make_ab_dag()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+  check(aug.layer_count                      == 2, "idn: A→B → layer_count = 2")
+  check(dummy_edge_list_len(aug.dummy_edges) == 0, "idn: A→B → 0 dummy edge entries")
+  check(gw_node_count(aug.graph)             == 2, "idn: A→B → aug graph has 2 nodes")
+  aug_edges := gw_edges_full(aug.graph)
+  check(edge_info_len(aug_edges)             == 1, "idn: A→B → aug graph has 1 edge")
+}
+
+test_idn_chain_no_dummies := () -> _ {
+  // A→B→C: all single-layer spans; no dummy nodes inserted.
+  g   := make_chain()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+  check(aug.layer_count                      == 3, "idn: chain → layer_count = 3")
+  check(dummy_edge_list_len(aug.dummy_edges) == 0, "idn: chain → 0 dummy edge entries")
+  check(gw_node_count(aug.graph)             == 3, "idn: chain → aug graph has 3 nodes")
+  aug_edges := gw_edges_full(aug.graph)
+  check(edge_info_len(aug_edges)             == 2, "idn: chain → aug graph has 2 edges")
+}
+
+test_idn_skip_one_layer := () -> _ {
+  // A→B→C chain + A→C skip (layer_diff=2 for A→C) → 1 dummy node.
+  //   Edges in dag order: A→B (direct), B→C (direct), A→C (split).
+  //   edge_counter only increments for splits → this_edge=0 for A→C.
+  //   Dummy: "__dummy__0_0" at layer 1.
+  //   Aug graph: nodes={A,B,C,__dummy__0_0}, edges={A→B, B→C, A→dum, dum→C}.
+  g   := make_chain_with_skip()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+
+  // Layer count unchanged (dummy at layer 1 is already covered).
+  check(aug.layer_count == 3, "idn: skip-1 → layer_count = 3")
+
+  // Exactly one split recorded.
+  check(dummy_edge_list_len(aug.dummy_edges) == 1, "idn: skip-1 → 1 dummy edge entry")
+
+  // Original endpoints preserved.
+  check(dummy_edge_list_orig_src(aug.dummy_edges, 0) == "A",
+        "idn: skip-1 → orig src = A")
+  check(dummy_edge_list_orig_tgt(aug.dummy_edges, 0) == "C",
+        "idn: skip-1 → orig tgt = C")
+
+  // One dummy ID.
+  dids := dummy_edge_list_dummy_ids(aug.dummy_edges, 0)
+  check(str_list_len(dids) == 1, "idn: skip-1 → 1 dummy id")
+
+  // Dummy node is at layer 1.
+  did0 := str_list_get(dids, 0)
+  check(deg_map_get(aug.layers, did0) == 1,
+        "idn: skip-1 → dummy node at layer 1")
+
+  // Augmented graph size: 4 nodes (A,B,C,dum), 4 edges (A→B, B→C, A→dum, dum→C).
+  check(gw_node_count(aug.graph) == 4, "idn: skip-1 → aug graph has 4 nodes")
+  aug_edges := gw_edges_full(aug.graph)
+  check(edge_info_len(aug_edges) == 4, "idn: skip-1 → aug graph has 4 edges")
+}
+
+test_idn_skip_two_layers := () -> _ {
+  // A→B→C→D chain + A→D skip (layer_diff=3) → 2 dummy nodes.
+  //   Edges in dag order: A→B (direct), B→C (direct), C→D (direct), A→D (split).
+  //   edge_counter=0 for A→D split → dummy IDs "__dummy__0_0", "__dummy__0_1".
+  //   Chain: A → __dummy__0_0 → __dummy__0_1 → D.
+  //   Dummies at layers 1 and 2.
+  g   := make_chain_d_with_skip()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+
+  // Layer count = 4 (layers 0,1,2,3; max=3, count=4).
+  check(aug.layer_count == 4, "idn: skip-2 → layer_count = 4")
+
+  // Exactly one split recorded.
+  check(dummy_edge_list_len(aug.dummy_edges) == 1, "idn: skip-2 → 1 dummy edge entry")
+
+  // Original endpoints.
+  check(dummy_edge_list_orig_src(aug.dummy_edges, 0) == "A",
+        "idn: skip-2 → orig src = A")
+  check(dummy_edge_list_orig_tgt(aug.dummy_edges, 0) == "D",
+        "idn: skip-2 → orig tgt = D")
+
+  // Two dummy IDs.
+  dids := dummy_edge_list_dummy_ids(aug.dummy_edges, 0)
+  check(str_list_len(dids) == 2, "idn: skip-2 → 2 dummy ids")
+
+  // Dummy nodes at layers 1 and 2.
+  did0 := str_list_get(dids, 0)
+  did1 := str_list_get(dids, 1)
+  check(deg_map_get(aug.layers, did0) == 1,
+        "idn: skip-2 → first dummy at layer 1")
+  check(deg_map_get(aug.layers, did1) == 2,
+        "idn: skip-2 → second dummy at layer 2")
+
+  // Augmented graph: 6 nodes (A,B,C,D + 2 dummies), 6 edges.
+  check(gw_node_count(aug.graph) == 6, "idn: skip-2 → aug graph has 6 nodes")
+  aug_edges := gw_edges_full(aug.graph)
+  check(edge_info_len(aug_edges) == 6, "idn: skip-2 → aug graph has 6 edges")
+}
+
+test_idn_diamond_no_dummies := () -> _ {
+  // Diamond A→B, A→C, B→D, C→D: all single-layer spans, no dummies.
+  // assign_layers → A=0, B=1, C=1, D=2; layer_diff=1 for all edges.
+  g   := make_diamond()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+  check(aug.layer_count                      == 3, "idn: diamond → layer_count = 3")
+  check(dummy_edge_list_len(aug.dummy_edges) == 0, "idn: diamond → 0 dummy edge entries")
+  check(gw_node_count(aug.graph)             == 4, "idn: diamond → 4 nodes in aug graph")
+  aug_edges := gw_edges_full(aug.graph)
+  check(edge_info_len(aug_edges)             == 4, "idn: diamond → 4 edges in aug graph")
+}
+
+test_idn_layer_assignment_preserved := () -> _ {
+  // Verify that original node layers are preserved in aug.layers.
+  // A→B: A=0, B=1.
+  g   := make_ab_dag()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+  check(deg_map_get(aug.layers, "A") == 0, "idn: layers preserved → A at layer 0")
+  check(deg_map_get(aug.layers, "B") == 1, "idn: layers preserved → B at layer 1")
+}
+
+test_idn_edge_type_preserved := () -> _ {
+  // Edge type is preserved on the dummy split's dummy_edge_list entry.
+  // Use a chain_with_skip graph; the A→C edge is type "Arrow".
+  g   := make_chain_with_skip()
+  la  := assign_layers(g)
+  dag, _ := remove_cycles(g)
+  aug := insert_dummy_nodes(dag, la)
+  etype := dummy_edge_list_etype(aug.dummy_edges, 0)
+  check(etype == "Arrow", "idn: edge type preserved → Arrow")
+}
+
+
+// ── minimise_crossings test graph builders ────────────────────────────────────
+// Graph for crossing test: A→Y, B→X.
+// assign_layers: A=0, B=0 (sources), X=1 (succ of B), Y=1 (succ of A).
+// Initial alphabetical ordering: layer 0=[A,B], layer 1=[X,Y].
+// Edges between layers: A(pos 0)→Y(pos 1) and B(pos 1)→X(pos 0) → 1 crossing.
+// After minimise_crossings forward pass: layer 1 sorted by incoming barycenter:
+//   barycenter(X) = pos(B) = 1.0, barycenter(Y) = pos(A) = 0.0 → [Y, X].
+//   Now: A(pos 0)→Y(pos 0), B(pos 1)→X(pos 1) → 0 crossings.
+
+make_crossing_graph := () -> Graph {
+  mg := mgraph_new()
+  mgraph_add_node_full(mg, "A", "A", "Rectangle")
+  mgraph_add_node_full(mg, "B", "B", "Rectangle")
+  mgraph_add_node_full(mg, "X", "X", "Rectangle")
+  mgraph_add_node_full(mg, "Y", "Y", "Rectangle")
+  mgraph_add_edge_full(mg, "A", "Y", "Arrow", "")
+  mgraph_add_edge_full(mg, "B", "X", "Arrow", "")
+  mgraph_build(mg)
+}
+
+// Helper: build an AugmentedGraph from a Graph via the full Phase 1–3 pipeline.
+make_aug := (g) -> AugmentedGraph {
+  la      := assign_layers(g)
+  dag, _  := remove_cycles(g)
+  insert_dummy_nodes(dag, la)
+}
+
+
+// ── minimise_crossings tests ──────────────────────────────────────────────────
+// Phase 4: each test calls make_aug to get an AugmentedGraph, then calls
+// minimise_crossings and inspects the resulting OrderingList.
+//
+// Key accessor functions:
+//   ordering_layer_count(ol) -> int         — number of layers
+//   ordering_get_layer(ol, idx) -> StrList  — node IDs for one layer
+//   str_list_len(sl) -> int                 — nodes in that layer
+//   str_list_get(sl, idx) -> str            — one node ID
+//   ordering_count_crossings(ol, g) -> int  — edge crossings in ordering
+
+test_mc_empty := () -> _ {
+  // Empty graph → OrderingList with layer_count=1, layer 0 has 0 nodes.
+  g   := make_empty_graph()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  check(ordering_layer_count(ol) == 1, "mc: empty → 1 layer")
+  layer0 := ordering_get_layer(ol, 0)
+  check(str_list_len(layer0) == 0, "mc: empty → layer 0 has 0 nodes")
+}
+
+test_mc_single_node := () -> _ {
+  // Single node "A" → OrderingList: 1 layer, layer 0 = ["A"].
+  g   := make_single_node()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  check(ordering_layer_count(ol) == 1, "mc: single → 1 layer")
+  layer0 := ordering_get_layer(ol, 0)
+  check(str_list_len(layer0) == 1, "mc: single → layer 0 has 1 node")
+  check(str_list_get(layer0, 0) == "A", "mc: single → layer 0[0] = A")
+}
+
+test_mc_ab_dag := () -> _ {
+  // A→B: 2 layers, [[A], [B]], already no crossings.
+  g   := make_ab_dag()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  check(ordering_layer_count(ol) == 2, "mc: A→B → 2 layers")
+  layer0 := ordering_get_layer(ol, 0)
+  layer1 := ordering_get_layer(ol, 1)
+  check(str_list_len(layer0) == 1, "mc: A→B → layer 0 has 1 node")
+  check(str_list_len(layer1) == 1, "mc: A→B → layer 1 has 1 node")
+  check(str_list_get(layer0, 0) == "A", "mc: A→B → layer 0[0] = A")
+  check(str_list_get(layer1, 0) == "B", "mc: A→B → layer 1[0] = B")
+  check(ordering_count_crossings(ol, aug.graph) == 0, "mc: A→B → 0 crossings")
+}
+
+test_mc_chain := () -> _ {
+  // A→B→C: 3 layers, [[A], [B], [C]], no crossings possible.
+  g   := make_chain()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  check(ordering_layer_count(ol) == 3, "mc: chain → 3 layers")
+  layer0 := ordering_get_layer(ol, 0)
+  layer1 := ordering_get_layer(ol, 1)
+  layer2 := ordering_get_layer(ol, 2)
+  check(str_list_len(layer0) == 1, "mc: chain → layer 0 has 1 node")
+  check(str_list_len(layer1) == 1, "mc: chain → layer 1 has 1 node")
+  check(str_list_len(layer2) == 1, "mc: chain → layer 2 has 1 node")
+  check(ordering_count_crossings(ol, aug.graph) == 0, "mc: chain → 0 crossings")
+}
+
+test_mc_diamond_layers := () -> _ {
+  // Diamond A→B, A→C, B→D, C→D:
+  // 3 layers: layer 0=[A], layer 1=[B,C], layer 2=[D].
+  // No crossings possible in a diamond.
+  g   := make_diamond()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  check(ordering_layer_count(ol) == 3, "mc: diamond → 3 layers")
+  layer0 := ordering_get_layer(ol, 0)
+  layer1 := ordering_get_layer(ol, 1)
+  layer2 := ordering_get_layer(ol, 2)
+  check(str_list_len(layer0) == 1, "mc: diamond → layer 0 has 1 node (A)")
+  check(str_list_len(layer1) == 2, "mc: diamond → layer 1 has 2 nodes (B,C)")
+  check(str_list_len(layer2) == 1, "mc: diamond → layer 2 has 1 node (D)")
+  check(ordering_count_crossings(ol, aug.graph) == 0, "mc: diamond → 0 crossings")
+}
+
+test_mc_diamond_total_nodes := () -> _ {
+  // Diamond: verify all 4 nodes appear across all layers.
+  g   := make_diamond()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  layer0 := ordering_get_layer(ol, 0)
+  layer1 := ordering_get_layer(ol, 1)
+  layer2 := ordering_get_layer(ol, 2)
+  total  := str_list_len(layer0) + str_list_len(layer1) + str_list_len(layer2)
+  check(total == 4, "mc: diamond → 4 total nodes")
+}
+
+test_mc_crossing_reduced := () -> _ {
+  // A→Y, B→X: initial ordering [A,B],[X,Y] has 1 crossing.
+  // After minimise_crossings, crossings = 0.
+  g   := make_crossing_graph()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  check(ordering_layer_count(ol) == 2, "mc: crossing → 2 layers")
+  // After sorting, no crossings should remain.
+  check(ordering_count_crossings(ol, aug.graph) == 0,
+        "mc: crossing → 0 crossings after minimise")
+}
+
+test_mc_crossing_total_nodes := () -> _ {
+  // A→Y, B→X: 4 nodes total across 2 layers.
+  g   := make_crossing_graph()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  layer0 := ordering_get_layer(ol, 0)
+  layer1 := ordering_get_layer(ol, 1)
+  total  := str_list_len(layer0) + str_list_len(layer1)
+  check(total == 4, "mc: crossing → 4 total nodes")
+}
+
+test_mc_count_crossings_manual := () -> _ {
+  // Manually build an ordering [[A,B],[X,Y]] and the crossing graph A→Y, B→X,
+  // then verify count_crossings reports 1 (not 0) before minimise runs.
+  g   := make_crossing_graph()
+  aug := make_aug(g)
+  // Build the crossing ordering by hand: layer 0=[A,B], layer 1=[X,Y].
+  manual := ordering_new(2)
+  ordering_push(manual, 0, "A")
+  ordering_push(manual, 0, "B")
+  ordering_push(manual, 1, "X")
+  ordering_push(manual, 1, "Y")
+  // A(pos 0)→Y(pos 1) and B(pos 1)→X(pos 0) cross.
+  check(ordering_count_crossings(manual, aug.graph) == 1,
+        "mc: manual cross → count_crossings = 1")
+}
+
+test_mc_count_crossings_no_cross := () -> _ {
+  // Manually build [[A,B],[Y,X]] for the crossing graph — no crossings.
+  // A(pos 0)→Y(pos 0), B(pos 1)→X(pos 1): same relative order → 0 crossings.
+  g   := make_crossing_graph()
+  aug := make_aug(g)
+  manual := ordering_new(2)
+  ordering_push(manual, 0, "A")
+  ordering_push(manual, 0, "B")
+  ordering_push(manual, 1, "Y")
+  ordering_push(manual, 1, "X")
+  check(ordering_count_crossings(manual, aug.graph) == 0,
+        "mc: manual no-cross → count_crossings = 0")
+}
+
+test_mc_chain_with_skip := () -> _ {
+  // A→B→C + A→C skip: 3 nodes plus 1 dummy (for A→C), so 4 total.
+  // 3 layers; layer 0=[A], layer 1=[B, __dummy__0_0], layer 2=[C].
+  // No crossings (all edges go straight down).
+  g   := make_chain_with_skip()
+  aug := make_aug(g)
+  ol  := minimise_crossings(aug)
+  check(ordering_layer_count(ol) == 3, "mc: chain-skip → 3 layers")
+  layer0 := ordering_get_layer(ol, 0)
+  layer1 := ordering_get_layer(ol, 1)
+  layer2 := ordering_get_layer(ol, 2)
+  check(str_list_len(layer0) == 1, "mc: chain-skip → layer 0 has 1 node")
+  check(str_list_len(layer1) == 2, "mc: chain-skip → layer 1 has 2 nodes")
+  check(str_list_len(layer2) == 1, "mc: chain-skip → layer 2 has 1 node")
+}
+
+
+// ── Run all ───────────────────────────────────────────────────────────────────
+
+main := () -> _ {
+  print("=== test_layout ===")
+
+  // greedy_fas_ordering
+  test_fas_empty()
+  test_fas_single_node()
+  test_fas_chain_length()
+  test_fas_chain_order()
+  test_fas_ab_dag()
+  test_fas_two_node_cycle_length()
+  test_fas_three_node_cycle_length()
+  test_fas_diamond()
+
+  // remove_cycles
+  test_rc_empty()
+  test_rc_chain_dag()
+  test_rc_ab_dag()
+  test_rc_self_loop()
+  test_rc_two_node_cycle()
+  test_rc_three_node_cycle()
+  test_rc_diamond()
+
+  // assign_layers
+  test_al_empty()
+  test_al_single_node()
+  test_al_ab_dag()
+  test_al_chain()
+  test_al_diamond()
+  test_al_self_loop()
+  test_al_two_node_cycle()
+  test_al_three_node_cycle()
+
+  // insert_dummy_nodes
+  test_idn_empty()
+  test_idn_single_node()
+  test_idn_ab_dag()
+  test_idn_chain_no_dummies()
+  test_idn_skip_one_layer()
+  test_idn_skip_two_layers()
+  test_idn_diamond_no_dummies()
+  test_idn_layer_assignment_preserved()
+  test_idn_edge_type_preserved()
+
+  // minimise_crossings
+  test_mc_empty()
+  test_mc_single_node()
+  test_mc_ab_dag()
+  test_mc_chain()
+  test_mc_diamond_layers()
+  test_mc_diamond_total_nodes()
+  test_mc_crossing_reduced()
+  test_mc_crossing_total_nodes()
+  test_mc_count_crossings_manual()
+  test_mc_count_crossings_no_cross()
+  test_mc_chain_with_skip()
+
+  print("=== done ===")
+}

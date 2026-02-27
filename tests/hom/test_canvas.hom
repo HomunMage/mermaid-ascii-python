@@ -1,0 +1,280 @@
+// test_canvas.hom — Tests for canvas.hom
+//
+// Exercises: rect_new, rect_right, rect_bottom,
+//            canvas_new, canvas_get, canvas_set,
+//            canvas_set_merge, canvas_hline, canvas_vline,
+//            canvas_draw_box, canvas_write_str, canvas_to_string
+
+use std
+use charset
+use canvas
+
+// ── Test helper ───────────────────────────────────────────────────────────────
+
+// Print FAIL with message when condition is false; otherwise silent.
+check := (cond: bool, msg: str) -> _ {
+  if (cond) do {
+    print("  ok: ${msg}")
+  } else {
+    print("FAIL: ${msg}")
+  }
+}
+
+// ── Rect tests ────────────────────────────────────────────────────────────────
+
+test_rect_basics := () -> _ {
+  r := rect_new(3, 5, 10, 4)
+  check(r.x      == 3,  "rect.x == 3")
+  check(r.y      == 5,  "rect.y == 5")
+  check(r.width  == 10, "rect.width == 10")
+  check(r.height == 4,  "rect.height == 4")
+  check(rect_right(r)  == 13, "rect_right == 13")
+  check(rect_bottom(r) == 9,  "rect_bottom == 9")
+}
+
+// ── canvas_new + canvas_get ───────────────────────────────────────────────────
+
+test_canvas_new_all_spaces := () -> _ {
+  c := canvas_new(5, 3, CharSet.Ascii)
+  check(c.width  == 5, "canvas width == 5")
+  check(c.height == 3, "canvas height == 3")
+  // All cells start as space
+  all_spaces := true
+  for row in range(3) do {
+    for col in range(5) do {
+      if (canvas_get(c, col, row) != " ") do {
+        all_spaces := false
+      }
+    }
+  }
+  check(all_spaces, "all initial cells are spaces")
+}
+
+test_canvas_get_out_of_bounds := () -> _ {
+  c := canvas_new(4, 4, CharSet.Ascii)
+  check(canvas_get(c, -1,  0) == " ", "oob left returns space")
+  check(canvas_get(c,  4,  0) == " ", "oob right returns space")
+  check(canvas_get(c,  0, -1) == " ", "oob top returns space")
+  check(canvas_get(c,  0,  4) == " ", "oob bottom returns space")
+}
+
+// ── canvas_set ────────────────────────────────────────────────────────────────
+
+test_canvas_set_and_get := () -> _ {
+  c := canvas_new(5, 5, CharSet.Ascii)
+  canvas_set(c, 2, 1, "X")
+  check(canvas_get(c, 2, 1) == "X", "set then get returns X")
+  check(canvas_get(c, 0, 0) == " ", "other cell unchanged")
+}
+
+test_canvas_set_out_of_bounds_is_noop := () -> _ {
+  c := canvas_new(3, 3, CharSet.Ascii)
+  canvas_set(c, -1, 0, "X")
+  canvas_set(c,  3, 0, "X")
+  canvas_set(c,  0, 3, "X")
+  // Nothing changed — all cells should still be spaces
+  all_spaces := true
+  for row in range(3) do {
+    for col in range(3) do {
+      if (canvas_get(c, col, row) != " ") do {
+        all_spaces := false
+      }
+    }
+  }
+  check(all_spaces, "oob set does not write")
+}
+
+// ── canvas_set_merge ──────────────────────────────────────────────────────────
+
+test_canvas_set_merge_junction_ascii := () -> _ {
+  // Merging "|" (up+down) onto "-" (left+right) → cross → "+"
+  c := canvas_new(5, 5, CharSet.Ascii)
+  canvas_set(c, 2, 2, "-")
+  canvas_set_merge(c, 2, 2, "|")
+  check(canvas_get(c, 2, 2) == "+", "merge - and | gives + (cross)")
+}
+
+test_canvas_set_merge_unknown_overwrites := () -> _ {
+  // "A" is not a box-drawing char — plain overwrite
+  c := canvas_new(5, 5, CharSet.Ascii)
+  canvas_set(c, 1, 1, "-")
+  canvas_set_merge(c, 1, 1, "A")
+  check(canvas_get(c, 1, 1) == "A", "unknown char causes plain overwrite")
+}
+
+test_canvas_set_merge_oob_is_noop := () -> _ {
+  // Out-of-bounds set_merge should not crash
+  c := canvas_new(3, 3, CharSet.Ascii)
+  canvas_set_merge(c, -1, 0, "+")
+  canvas_set_merge(c,  0, 3, "+")
+  // Canvas is still all spaces
+  all_spaces := true
+  for row in range(3) do {
+    for col in range(3) do {
+      if (canvas_get(c, col, row) != " ") do {
+        all_spaces := false
+      }
+    }
+  }
+  check(all_spaces, "oob set_merge does not write")
+}
+
+// ── canvas_hline ─────────────────────────────────────────────────────────────
+
+test_canvas_hline := () -> _ {
+  c := canvas_new(10, 5, CharSet.Ascii)
+  canvas_hline(c, 2, 1, 5, "-")
+  // Cells from col 1..5 on row 2 are "-"
+  all_dashes := true
+  for col in range(1, 6) do {
+    if (canvas_get(c, col, 2) != "-") do {
+      all_dashes := false
+    }
+  }
+  check(all_dashes, "hline cols 1..5 are dashes")
+  check(canvas_get(c, 0, 2) == " ", "col 0 not in hline")
+  check(canvas_get(c, 6, 2) == " ", "col 6 not in hline")
+}
+
+test_canvas_hline_reversed_coords := () -> _ {
+  // hline normalises x1/x2 order
+  c := canvas_new(10, 5, CharSet.Ascii)
+  canvas_hline(c, 0, 5, 2, "-")   // x1=5, x2=2 (reversed)
+  all_dashes := true
+  for col in range(2, 6) do {
+    if (canvas_get(c, col, 0) != "-") do {
+      all_dashes := false
+    }
+  }
+  check(all_dashes, "reversed hline normalises coords")
+}
+
+// ── canvas_vline ─────────────────────────────────────────────────────────────
+
+test_canvas_vline := () -> _ {
+  c := canvas_new(5, 10, CharSet.Ascii)
+  canvas_vline(c, 3, 1, 5, "|")
+  all_pipes := true
+  for row in range(1, 6) do {
+    if (canvas_get(c, 3, row) != "|") do {
+      all_pipes := false
+    }
+  }
+  check(all_pipes, "vline rows 1..5 are pipes")
+  check(canvas_get(c, 3, 0) == " ", "row 0 not in vline")
+  check(canvas_get(c, 3, 6) == " ", "row 6 not in vline")
+}
+
+// ── canvas_draw_box ───────────────────────────────────────────────────────────
+
+test_canvas_draw_box_ascii := () -> _ {
+  c  := canvas_new(8, 5, CharSet.Ascii)
+  r  := rect_new(1, 1, 6, 3)
+  bc := box_chars_ascii()
+  canvas_draw_box(c, r, bc)
+  // Corners (x0=1,y0=1), (x1=6,y1=3)
+  check(canvas_get(c, 1, 1) == "+", "top-left corner")
+  check(canvas_get(c, 6, 1) == "+", "top-right corner")
+  check(canvas_get(c, 1, 3) == "+", "bottom-left corner")
+  check(canvas_get(c, 6, 3) == "+", "bottom-right corner")
+  // Top edge cols 2..5
+  check(canvas_get(c, 2, 1) == "-", "top edge col 2")
+  check(canvas_get(c, 5, 1) == "-", "top edge col 5")
+  // Side edges at row 2
+  check(canvas_get(c, 1, 2) == "|", "left edge row 2")
+  check(canvas_get(c, 6, 2) == "|", "right edge row 2")
+  // Interior is untouched
+  check(canvas_get(c, 3, 2) == " ", "interior still space")
+}
+
+test_canvas_draw_box_too_small := () -> _ {
+  c  := canvas_new(5, 5, CharSet.Ascii)
+  bc := box_chars_ascii()
+  r1 := rect_new(0, 0, 1, 4)   // width = 1 (< 2)
+  r2 := rect_new(0, 0, 4, 1)   // height = 1 (< 2)
+  canvas_draw_box(c, r1, bc)
+  canvas_draw_box(c, r2, bc)
+  // Nothing drawn
+  all_spaces := true
+  for row in range(5) do {
+    for col in range(5) do {
+      if (canvas_get(c, col, row) != " ") do {
+        all_spaces := false
+      }
+    }
+  }
+  check(all_spaces, "too-small box not drawn")
+}
+
+// ── canvas_write_str ──────────────────────────────────────────────────────────
+
+test_canvas_write_str := () -> _ {
+  c := canvas_new(10, 3, CharSet.Ascii)
+  canvas_write_str(c, 2, 1, "hello")
+  check(canvas_get(c, 2, 1) == "h", "write_str char 0")
+  check(canvas_get(c, 3, 1) == "e", "write_str char 1")
+  check(canvas_get(c, 4, 1) == "l", "write_str char 2")
+  check(canvas_get(c, 5, 1) == "l", "write_str char 3")
+  check(canvas_get(c, 6, 1) == "o", "write_str char 4")
+  check(canvas_get(c, 7, 1) == " ", "cell after string unchanged")
+}
+
+test_canvas_write_str_clips_at_edge := () -> _ {
+  // String that extends past the right edge is clipped
+  c := canvas_new(5, 3, CharSet.Ascii)
+  canvas_write_str(c, 3, 0, "abcde")   // only "ab" fits (cols 3..4)
+  check(canvas_get(c, 3, 0) == "a", "clipped write char 0")
+  check(canvas_get(c, 4, 0) == "b", "clipped write char 1")
+  check(canvas_get(c, 0, 0) == " ", "untouched col 0")
+}
+
+// ── canvas_to_string ──────────────────────────────────────────────────────────
+
+test_canvas_to_string_simple := () -> _ {
+  c := canvas_new(5, 2, CharSet.Ascii)
+  canvas_write_str(c, 0, 0, "hello")
+  canvas_write_str(c, 0, 1, "world")
+  s := canvas_to_string(c)
+  check(s == "hello\nworld\n", "to_string two full rows")
+}
+
+test_canvas_to_string_trims_trailing_spaces := () -> _ {
+  c := canvas_new(8, 2, CharSet.Ascii)
+  canvas_write_str(c, 0, 0, "hi")    // cols 2..7 remain spaces
+  canvas_write_str(c, 0, 1, "bye")
+  s := canvas_to_string(c)
+  check(s == "hi\nbye\n", "trailing spaces stripped per row")
+}
+
+test_canvas_to_string_trims_trailing_empty_rows := () -> _ {
+  c := canvas_new(5, 4, CharSet.Ascii)
+  canvas_write_str(c, 0, 0, "abc")
+  // rows 1..3 are all spaces → stripped
+  s := canvas_to_string(c)
+  check(s == "abc\n", "trailing empty rows stripped")
+}
+
+// ── Run all ───────────────────────────────────────────────────────────────────
+
+main := () -> _ {
+  print("=== test_canvas ===")
+  test_rect_basics()
+  test_canvas_new_all_spaces()
+  test_canvas_get_out_of_bounds()
+  test_canvas_set_and_get()
+  test_canvas_set_out_of_bounds_is_noop()
+  test_canvas_set_merge_junction_ascii()
+  test_canvas_set_merge_unknown_overwrites()
+  test_canvas_set_merge_oob_is_noop()
+  test_canvas_hline()
+  test_canvas_hline_reversed_coords()
+  test_canvas_vline()
+  test_canvas_draw_box_ascii()
+  test_canvas_draw_box_too_small()
+  test_canvas_write_str()
+  test_canvas_write_str_clips_at_edge()
+  test_canvas_to_string_simple()
+  test_canvas_to_string_trims_trailing_spaces()
+  test_canvas_to_string_trims_trailing_empty_rows()
+  print("=== done ===")
+}

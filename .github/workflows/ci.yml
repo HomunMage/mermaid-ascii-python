@@ -27,6 +27,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Download homunc
+        run: |
+          wget -q https://github.com/HomunMage/Homun-Lang/releases/latest/download/homunc-linux-x86_64 -O /usr/local/bin/homunc
+          chmod +x /usr/local/bin/homunc
+        continue-on-error: true
+
       - name: Rust format check
         run: cargo fmt -- --check
 

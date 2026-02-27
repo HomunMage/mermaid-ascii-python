@@ -1,0 +1,185 @@
+// canvas.hom — 2D character grid for painting ASCII art
+//
+// Structs:   Rect, Canvas
+// Functions: rect_new, rect_right, rect_bottom,
+//            canvas_new, canvas_get, canvas_set,
+//            canvas_set_merge, canvas_hline, canvas_vline,
+//            canvas_draw_box, canvas_write_str, canvas_to_string
+
+use std
+use charset
+
+// ── Rect ──────────────────────────────────────────────────────────────────────
+// A rectangle in character-grid coordinates.
+
+Rect := struct {
+  x:      int,
+  y:      int,
+  width:  int,
+  height: int
+}
+
+rect_new := (x: int, y: int, width: int, height: int) -> Rect {
+  Rect { x: x, y: y, width: width, height: height }
+}
+
+// One-past-the-last column index (exclusive right bound).
+rect_right := (r: Rect) -> int {
+  r.x + r.width
+}
+
+// One-past-the-last row index (exclusive bottom bound).
+rect_bottom := (r: Rect) -> int {
+  r.y + r.height
+}
+
+// ── Canvas ────────────────────────────────────────────────────────────────────
+// A 2D character grid used as a painting surface.
+// cells is a list of rows; each row is a list of single-character strings.
+
+Canvas := struct {
+  width:   int,
+  height:  int,
+  charset: CharSet,
+  cells:   @[]
+}
+
+// Create a new canvas filled with spaces.
+canvas_new := (w: int, h: int, cs: CharSet) -> Canvas {
+  cells := @[]
+  for _ in range(h) do {
+    row := @[]
+    for _ in range(w) do {
+      push(row, " ")
+    }
+    push(cells, row)
+  }
+  Canvas { width: w, height: h, charset: cs, cells: cells }
+}
+
+// Return the character at (col, row); returns " " if out of bounds.
+canvas_get := (c: Canvas, col: int, row: int) -> str {
+  if (row >= 0 && row < c.height && col >= 0 && col < c.width) do {
+    c.cells[row][col]
+  } else {
+    " "
+  }
+}
+
+// Set the character at (col, row); silently ignores out-of-bounds writes.
+canvas_set := (c: Canvas, col: int, row: int, ch: str) -> _ {
+  if (row >= 0 && row < c.height && col >= 0 && col < c.width) do {
+    c.cells[row][col] := ch
+  }
+}
+
+// Set a cell, merging junction box-drawing characters when both the existing
+// cell and the new character are recognised box-drawing glyphs.
+// Falls back to a plain overwrite when either is not a known junction char.
+canvas_set_merge := (c: Canvas, col: int, row: int, ch: str) -> _ {
+  if (row >= 0 && col >= 0 && row < c.height && col < c.width) do {
+    existing := c.cells[row][col]
+    ea := arms_from_char(existing)
+    na := arms_from_char(ch)
+    if (ea != none && na != none) do {
+      merged := arms_merge(ea, na)
+      c.cells[row][col] := arms_to_char(merged, c.charset)
+    } else {
+      c.cells[row][col] := ch
+    }
+  }
+}
+
+// Draw a horizontal line from x1 to x2 (inclusive) at row y,
+// using junction-merge at each cell.
+canvas_hline := (c: Canvas, y: int, x1: int, x2: int, ch: str) -> _ {
+  lo := min(x1, x2)
+  hi := max(x1, x2)
+  for col in range(lo, hi + 1) do {
+    canvas_set_merge(c, col, y, ch)
+  }
+}
+
+// Draw a vertical line from y1 to y2 (inclusive) at column x,
+// using junction-merge at each cell.
+canvas_vline := (c: Canvas, x: int, y1: int, y2: int, ch: str) -> _ {
+  lo := min(y1, y2)
+  hi := max(y1, y2)
+  for row in range(lo, hi + 1) do {
+    canvas_set_merge(c, x, row, ch)
+  }
+}
+
+// Draw a box outline using the characters from BoxChars.
+// Requires rect.width >= 2 and rect.height >= 2; silently skips otherwise.
+canvas_draw_box := (c: Canvas, r: Rect, bc: BoxChars) -> _ {
+  if (r.width >= 2 && r.height >= 2) do {
+    x0 := r.x
+    y0 := r.y
+    x1 := r.x + r.width  - 1
+    y1 := r.y + r.height - 1
+    // Corners
+    canvas_set(c, x0, y0, bc.top_left)
+    canvas_set(c, x1, y0, bc.top_right)
+    canvas_set(c, x0, y1, bc.bottom_left)
+    canvas_set(c, x1, y1, bc.bottom_right)
+    // Top and bottom edges
+    for col in range(x0 + 1, x1) do {
+      canvas_set(c, col, y0, bc.horizontal)
+      canvas_set(c, col, y1, bc.horizontal)
+    }
+    // Left and right edges
+    for row in range(y0 + 1, y1) do {
+      canvas_set(c, x0, row, bc.vertical)
+      canvas_set(c, x1, row, bc.vertical)
+    }
+  }
+}
+
+// Write a string starting at (col, row), clipping at canvas edges.
+canvas_write_str := (c: Canvas, col: int, row: int, s: str) -> _ {
+  n := len(s)
+  for i in range(n) do {
+    cc := col + i
+    if (cc < c.width && row < c.height) do {
+      c.cells[row][cc] := char_at(s, i)
+    }
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Remove trailing space characters from a string.
+str_rstrip_spaces := (s: str) -> str {
+  n := len(s)
+  i := n - 1
+  while (i >= 0 && char_at(s, i) == " ") do {
+    i := i - 1
+  }
+  substr(s, 0, i + 1)
+}
+
+// ── canvas_to_string ──────────────────────────────────────────────────────────
+
+// Render the canvas to a string.
+// Each row has trailing spaces stripped.
+// Trailing empty rows are removed.
+// The result always ends with exactly one newline.
+canvas_to_string := (c: Canvas) -> str {
+  // Build lines: join each row's cells and rstrip trailing spaces
+  str_lines := @[]
+  for row in c.cells do {
+    line    := join(row, "")
+    trimmed := str_rstrip_spaces(line)
+    push(str_lines, trimmed)
+  }
+  // Join rows with newlines
+  out := join(str_lines, "\n")
+  // Strip trailing newlines (which arise from empty trailing rows in join)
+  j := len(out) - 1
+  while (j >= 0 && char_at(out, j) == "\n") do {
+    j := j - 1
+  }
+  result := substr(out, 0, j + 1)
+  result + "\n"
+}

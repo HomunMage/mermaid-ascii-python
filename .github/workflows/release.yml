@@ -39,6 +39,7 @@ jobs:
         run: |
           docker buildx build \
             --build-arg TARGET=${{ matrix.target }} \
+            --build-arg VERSION=${{ github.event.workflow_run.head_branch }} \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
             --output type=local,dest=./out .
@@ -67,6 +68,7 @@ jobs:
         run: |
           docker buildx build \
             -f Dockerfile.wasm \
+            --build-arg VERSION=${{ github.event.workflow_run.head_branch }} \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
             --output type=local,dest=./out .
