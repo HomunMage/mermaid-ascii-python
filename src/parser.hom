@@ -63,7 +63,7 @@ cursor_consume := (c: Cursor, s: str) -> bool {
 // Does NOT skip newlines.
 cursor_skip_ws := (c: Cursor) -> _ {
   done := false
-  while (!done) do {
+  while (not done) do {
     m1, _, e1 := re_match("[ \\t]+", c.src, c.pos)
     if (m1) do {
       c.pos := e1
@@ -81,7 +81,7 @@ cursor_skip_ws := (c: Cursor) -> _ {
 // Skip horizontal whitespace, %% line comments, AND newlines (\r\n, \n, \r).
 cursor_skip_ws_and_newlines := (c: Cursor) -> _ {
   done := false
-  while (!done) do {
+  while (not done) do {
     m1, _, e1 := re_match("[ \\t]+", c.src, c.pos)
     if (m1) do {
       c.pos := e1
@@ -145,13 +145,13 @@ cursor_parse_quoted_string := (c: Cursor) -> str {
   c.pos := c.pos + 1
   buf  := @[]
   done := false
-  while (!done && c.pos < len(c.src)) do {
+  while (not done and c.pos < len(c.src)) do {
     ch := char_at(c.src, c.pos)
     if (ch == "\"") do {
       c.pos := c.pos + 1
       done  := true
     } else {
-      if (ch == "\\" && c.pos + 1 < len(c.src)) do {
+      if (ch == "\\" and c.pos + 1 < len(c.src)) do {
         nxt    := char_at(c.src, c.pos + 1)
         pushed := match nxt {
           "n"  => "\n"
@@ -177,7 +177,7 @@ cursor_parse_quoted_string := (c: Cursor) -> str {
 // are not ], ), }, or newline.  Leading whitespace is skipped first.
 cursor_parse_node_label := (c: Cursor) -> str {
   cursor_skip_ws(c)
-  if (c.pos < len(c.src) && char_at(c.src, c.pos) == "\"") do {
+  if (c.pos < len(c.src) and char_at(c.src, c.pos) == "\"") do {
     cursor_parse_quoted_string(c)
   } else {
     // Bare label: anything except ], ), }, newline
@@ -294,7 +294,7 @@ cursor_parse_edge_connector := (c: Cursor) -> EdgeType {
   patterns := edge_patterns()
   result   := none
   for ep in patterns do {
-    if (result == none && cursor_peek(c, ep.token)) do {
+    if (result == none and cursor_peek(c, ep.token)) do {
       c.pos  := c.pos + len(ep.token)
       result := ep.etype
     }
@@ -323,7 +323,7 @@ cursor_consume_newline := (c: Cursor) -> bool {
 // trimmed label text (possibly ""), or none if no | is found.
 cursor_try_parse_edge_label := (c: Cursor) -> str {
   cursor_skip_ws(c)
-  if (!cursor_consume(c, "|")) do {
+  if (not cursor_consume(c, "|")) do {
     none
   } else {
     matched, text, end_pos := re_match("[^|\\n]+", c.src, c.pos)
@@ -355,7 +355,7 @@ EdgeChainSeg := struct {
 cursor_parse_edge_chain := (c: Cursor) -> @[] {
   segs := @[]
   done := false
-  while (!done) do {
+  while (not done) do {
     saved := c.pos
     etype := cursor_parse_edge_connector(c)
     if (etype == none) do {
@@ -444,7 +444,7 @@ cursor_try_parse_node_stmt := (c: Cursor) -> Node {
 // Return true if the cursor is positioned at the "end" keyword, i.e., "end"
 // is not immediately followed by an alphanumeric, underscore, or hyphen.
 cursor_at_end_keyword := (c: Cursor) -> bool {
-  if (!cursor_peek(c, "end")) do {
+  if (not cursor_peek(c, "end")) do {
     false
   } else {
     after := c.pos + 3
@@ -452,7 +452,7 @@ cursor_at_end_keyword := (c: Cursor) -> bool {
       true
     } else {
       m, _, _ := re_match("[a-zA-Z0-9_-]", c.src, after)
-      !m
+      not m
     }
   }
 }
@@ -461,7 +461,7 @@ cursor_at_end_keyword := (c: Cursor) -> bool {
 // up to the next newline), trimmed of surrounding whitespace.
 cursor_parse_subgraph_label := (c: Cursor) -> str {
   cursor_skip_ws(c)
-  if (c.pos < len(c.src) && char_at(c.src, c.pos) == "\"") do {
+  if (c.pos < len(c.src) and char_at(c.src, c.pos) == "\"") do {
     cursor_parse_quoted_string(c)
   } else {
     matched, text, end_pos := re_match("[^\\n]+", c.src, c.pos)
@@ -479,7 +479,7 @@ cursor_parse_subgraph_label := (c: Cursor) -> str {
 cursor_try_parse_subgraph_direction := (c: Cursor) -> Direction {
   saved := c.pos
   cursor_skip_ws(c)
-  if (!cursor_consume(c, "direction")) do {
+  if (not cursor_consume(c, "direction")) do {
     c.pos := saved
     none
   } else {
@@ -540,7 +540,7 @@ cursor_parse_statement_into := (c: Cursor, nodes: @[], edges: @[], subgraphs: @[
 cursor_parse_subgraph_block := (c: Cursor) -> Subgraph {
   saved := c.pos
   cursor_skip_ws(c)
-  if (!cursor_consume(c, "subgraph")) do {
+  if (not cursor_consume(c, "subgraph")) do {
     c.pos := saved
     none
   } else {
@@ -564,7 +564,7 @@ cursor_parse_subgraph_block := (c: Cursor) -> Subgraph {
         sg.direction := dir
       }
       done := false
-      while (!cursor_eof(c) && !done) do {
+      while (not cursor_eof(c) and not done) do {
         cursor_skip_ws(c)
         if (cursor_at_end_keyword(c)) do {
           c.pos := c.pos + 3
@@ -573,9 +573,9 @@ cursor_parse_subgraph_block := (c: Cursor) -> Subgraph {
           done := true
         } else {
           ok := cursor_parse_statement_into(c, sg.nodes, sg.edges, sg.subgraphs)
-          if (!ok) do {
+          if (not ok) do {
             did_nl := cursor_consume_newline(c)
-            if (!did_nl) do {
+            if (not did_nl) do {
               c.pos := c.pos + 1
             }
           }
@@ -594,10 +594,10 @@ cursor_try_parse_header := (c: Cursor) -> Direction {
   saved := c.pos
   cursor_skip_ws_and_newlines(c)
   ok := cursor_consume(c, "flowchart")
-  if (!ok) do {
+  if (not ok) do {
     ok := cursor_consume(c, "graph")
   }
-  if (!ok) do {
+  if (not ok) do {
     c.pos := saved
     none
   } else {
@@ -625,12 +625,12 @@ cursor_parse_graph := (c: Cursor) -> Graph {
   if (dir != none) do {
     g.direction := dir
   }
-  while (!cursor_eof(c)) do {
+  while (not cursor_eof(c)) do {
     cursor_skip_ws(c)
-    if (!cursor_eof(c)) do {
-      if (!cursor_consume_newline(c)) do {
+    if (not cursor_eof(c)) do {
+      if (not cursor_consume_newline(c)) do {
         ok := cursor_parse_statement_into(c, g.nodes, g.edges, g.subgraphs)
-        if (!ok) do {
+        if (not ok) do {
           c.pos := c.pos + 1
         }
       }

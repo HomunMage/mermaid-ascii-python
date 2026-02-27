@@ -38,6 +38,8 @@ src/charset.rs
 src/canvas.rs
 src/render.rs
 
+.tmp/
+
 # Rust build artifacts
 target/
 pkg/

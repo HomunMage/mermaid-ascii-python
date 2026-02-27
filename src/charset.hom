@@ -168,10 +168,10 @@ arms_from_char := (c: str) -> Arms {
 // The result has an arm wherever either input has an arm.
 arms_merge := (a: Arms, b: Arms) -> Arms {
   Arms {
-    up:    a.up    || b.up,
-    down:  a.down  || b.down,
-    left:  a.left  || b.left,
-    right: a.right || b.right
+    up:    a.up    or b.up,
+    down:  a.down  or b.down,
+    left:  a.left  or b.left,
+    right: a.right or b.right
   }
 }
 

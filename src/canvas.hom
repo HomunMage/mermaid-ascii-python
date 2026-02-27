@@ -59,7 +59,7 @@ canvas_new := (w: int, h: int, cs: CharSet) -> Canvas {
 
 // Return the character at (col, row); returns " " if out of bounds.
 canvas_get := (c: Canvas, col: int, row: int) -> str {
-  if (row >= 0 && row < c.height && col >= 0 && col < c.width) do {
+  if (row >= 0 and row < c.height and col >= 0 and col < c.width) do {
     c.cells[row][col]
   } else {
     " "
@@ -68,7 +68,7 @@ canvas_get := (c: Canvas, col: int, row: int) -> str {
 
 // Set the character at (col, row); silently ignores out-of-bounds writes.
 canvas_set := (c: Canvas, col: int, row: int, ch: str) -> _ {
-  if (row >= 0 && row < c.height && col >= 0 && col < c.width) do {
+  if (row >= 0 and row < c.height and col >= 0 and col < c.width) do {
     c.cells[row][col] := ch
   }
 }
@@ -77,11 +77,11 @@ canvas_set := (c: Canvas, col: int, row: int, ch: str) -> _ {
 // cell and the new character are recognised box-drawing glyphs.
 // Falls back to a plain overwrite when either is not a known junction char.
 canvas_set_merge := (c: Canvas, col: int, row: int, ch: str) -> _ {
-  if (row >= 0 && col >= 0 && row < c.height && col < c.width) do {
+  if (row >= 0 and col >= 0 and row < c.height and col < c.width) do {
     existing := c.cells[row][col]
     ea := arms_from_char(existing)
     na := arms_from_char(ch)
-    if (ea != none && na != none) do {
+    if (ea != none and na != none) do {
       merged := arms_merge(ea, na)
       c.cells[row][col] := arms_to_char(merged, c.charset)
     } else {
@@ -113,7 +113,7 @@ canvas_vline := (c: Canvas, x: int, y1: int, y2: int, ch: str) -> _ {
 // Draw a box outline using the characters from BoxChars.
 // Requires rect.width >= 2 and rect.height >= 2; silently skips otherwise.
 canvas_draw_box := (c: Canvas, r: Rect, bc: BoxChars) -> _ {
-  if (r.width >= 2 && r.height >= 2) do {
+  if (r.width >= 2 and r.height >= 2) do {
     x0 := r.x
     y0 := r.y
     x1 := r.x + r.width  - 1
@@ -141,7 +141,7 @@ canvas_write_str := (c: Canvas, col: int, row: int, s: str) -> _ {
   n := len(s)
   for i in range(n) do {
     cc := col + i
-    if (cc < c.width && row < c.height) do {
+    if (cc < c.width and row < c.height) do {
       c.cells[row][cc] := char_at(s, i)
     }
   }
@@ -153,7 +153,7 @@ canvas_write_str := (c: Canvas, col: int, row: int, s: str) -> _ {
 str_rstrip_spaces := (s: str) -> str {
   n := len(s)
   i := n - 1
-  while (i >= 0 && char_at(s, i) == " ") do {
+  while (i >= 0 and char_at(s, i) == " ") do {
     i := i - 1
   }
   substr(s, 0, i + 1)
@@ -177,7 +177,7 @@ canvas_to_string := (c: Canvas) -> str {
   out := join(str_lines, "\n")
   // Strip trailing newlines (which arise from empty trailing rows in join)
   j := len(out) - 1
-  while (j >= 0 && char_at(out, j) == "\n") do {
+  while (j >= 0 and char_at(out, j) == "\n") do {
     j := j - 1
   }
   result := substr(out, 0, j + 1)
