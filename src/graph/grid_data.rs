@@ -53,7 +53,7 @@ pub fn grid_data_get(data: GridData, row: i32, col: i32, width: i32) -> bool {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+mod tests_grid_data {
     use super::*;
 
     #[test]

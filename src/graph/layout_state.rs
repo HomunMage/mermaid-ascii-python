@@ -436,6 +436,7 @@ pub fn fas_best_node(active: NodeSet, out_deg: DegMap, in_deg: DegMap) -> String
 // The dummy_ids field captures a snapshot (Vec<String>) at add-time so that
 // further mutations to the StrList passed in do not affect stored data.
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct DummyEdgeInfo {
     pub original_src: String,
     pub original_tgt: String,

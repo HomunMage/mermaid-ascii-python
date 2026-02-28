@@ -35,7 +35,8 @@ EdgeType := enum {
   ThickLine,
   BidirArrow,
   BidirDotted,
-  BidirThick
+  BidirThick,
+  None
 }
 
 // ── Attr (key-value metadata attached to nodes/edges) ─────────────────────────
@@ -67,13 +68,13 @@ Edge := struct {
   from_id: str,
   to_id: str,
   edge_type: EdgeType,
-  label: Option<str>,
+  label: str,
   attrs: @[Attr]
 }
 
-// Create an edge with no label by default.
+// Create an edge with no label by default (empty string = no label).
 edge_new := (from_id: str, to_id: str, edge_type: EdgeType) -> Edge {
-  Edge { from_id: from_id, to_id: to_id, edge_type: edge_type, label: none, attrs: @[] }
+  Edge { from_id: from_id, to_id: to_id, edge_type: edge_type, label: "", attrs: @[] }
 }
 
 // ── Subgraph ──────────────────────────────────────────────────────────────────
@@ -83,19 +84,19 @@ Subgraph := struct {
   nodes: @[Node],
   edges: @[Edge],
   subgraphs: @[Subgraph],
-  description: Option<str>,
-  direction: Option<Direction>
+  description: str,
+  direction: Direction
 }
 
-// Create an empty named subgraph.
+// Create an empty named subgraph (empty description, default TD direction).
 subgraph_new := (name: str) -> Subgraph {
   Subgraph {
     name: name,
     nodes: @[],
     edges: @[],
     subgraphs: @[],
-    description: none,
-    direction: none
+    description: "",
+    direction: Direction.TD
   }
 }
 

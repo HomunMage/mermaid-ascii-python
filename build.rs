@@ -75,6 +75,10 @@ fn generate_runtime() {
          {heap}\n"
     );
 
+    // Strip #[cfg(test)] mod tests { ... } blocks from the concatenated runtime
+    // to avoid duplicate `mod tests` errors when all files are in one module.
+    let code = strip_test_modules(&code);
+
     std::fs::write(&runtime_path, &code).unwrap();
     println!("cargo:warning=Generated runtime.rs ({} bytes) from src/hom/", code.len());
 
@@ -147,6 +151,11 @@ fn compile_hom_files() {
                     .status();
                 match status {
                     Ok(s) if s.success() => {
+                        // Strip duplicate #[cfg(test)] mod tests blocks from inlined deps
+                        if let Ok(content) = std::fs::read_to_string(&rs_path) {
+                            let cleaned = strip_test_modules(&content);
+                            let _ = std::fs::write(&rs_path, cleaned);
+                        }
                         println!(
                             "cargo:warning=Compiled {} -> {}",
                             path.display(),
@@ -170,4 +179,38 @@ fn compile_hom_files() {
             println!("cargo:rerun-if-changed={}", path.display());
         }
     }
+}
+
+/// Strip `#[cfg(test)] mod tests { ... }` blocks from concatenated Rust source.
+/// Handles nested braces correctly by counting brace depth.
+fn strip_test_modules(src: &str) -> String {
+    let mut result = String::with_capacity(src.len());
+    let mut lines = src.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed == "#[cfg(test)]" {
+            // Peek: if next non-empty line starts with "mod tests", skip the whole block
+            if let Some(&next) = lines.peek() {
+                if next.trim().starts_with("mod tests") {
+                    // Skip the #[cfg(test)] line and the mod tests { ... } block
+                    let mod_line = lines.next().unwrap();
+                    // Count braces to find the matching close
+                    let mut depth: i32 = mod_line.chars().filter(|&c| c == '{').count() as i32
+                        - mod_line.chars().filter(|&c| c == '}').count() as i32;
+                    while depth > 0 {
+                        if let Some(inner) = lines.next() {
+                            depth += inner.chars().filter(|&c| c == '{').count() as i32;
+                            depth -= inner.chars().filter(|&c| c == '}').count() as i32;
+                        } else {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    result
 }

@@ -41,7 +41,7 @@ Canvas := struct {
   width:   int,
   height:  int,
   charset: CharSet,
-  cells:   @[]
+  cells:   @[@[str]]
 }
 
 // Create a new canvas filled with spaces.
@@ -81,7 +81,7 @@ canvas_set_merge := (c: Canvas, col: int, row: int, ch: str) -> _ {
     existing := c.cells[row][col]
     ea := arms_from_char(existing)
     na := arms_from_char(ch)
-    if (ea != none and na != none) do {
+    if (ea.valid and na.valid) do {
       merged := arms_merge(ea, na)
       c.cells[row][col] := arms_to_char(merged, c.charset)
     } else {

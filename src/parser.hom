@@ -105,14 +105,14 @@ cursor_skip_ws_and_newlines := (c: Cursor) -> _ {
 
 // Try to match a node identifier [a-zA-Z_][a-zA-Z0-9_-]* at the current
 // position.  On success, advances the cursor and returns the matched text.
-// Returns none when no identifier is present.
+// Returns "" when no identifier is present.
 cursor_match_node_id := (c: Cursor) -> str {
   matched, text, end_pos := re_match("[a-zA-Z_][a-zA-Z0-9_-]*", c.src, c.pos)
   if (matched) do {
     c.pos := end_pos
     text
   } else {
-    none
+    ""
   }
 }
 
@@ -195,12 +195,13 @@ cursor_parse_node_label := (c: Cursor) -> str {
 
 // Carrier for the result of parsing a node shape bracket + label.
 ShapeParse := struct {
+  found: bool,
   shape: NodeShape,
   label: str
 }
 
 // Try to parse a node shape bracket and its enclosed label at the current
-// position.  Returns a ShapeParse on success, or none if no bracket is present.
+// position.  Returns ShapeParse with found=true on success, found=false otherwise.
 //
 // Precedence (longest bracket first):
 //   (( … ))  → Circle
@@ -212,27 +213,27 @@ cursor_parse_node_shape := (c: Cursor) -> ShapeParse {
     c.pos := c.pos + 2
     label := cursor_parse_node_label(c)
     cursor_consume(c, "))")
-    ShapeParse { shape: NodeShape.Circle, label: label }
+    ShapeParse { found: true, shape: NodeShape.Circle, label: label }
   } else {
     if (cursor_peek(c, "(")) do {
       c.pos := c.pos + 1
       label := cursor_parse_node_label(c)
       cursor_consume(c, ")")
-      ShapeParse { shape: NodeShape.Rounded, label: label }
+      ShapeParse { found: true, shape: NodeShape.Rounded, label: label }
     } else {
       if (cursor_peek(c, "{")) do {
         c.pos := c.pos + 1
         label := cursor_parse_node_label(c)
         cursor_consume(c, "}")
-        ShapeParse { shape: NodeShape.Diamond, label: label }
+        ShapeParse { found: true, shape: NodeShape.Diamond, label: label }
       } else {
         if (cursor_peek(c, "[")) do {
           c.pos := c.pos + 1
           label := cursor_parse_node_label(c)
           cursor_consume(c, "]")
-          ShapeParse { shape: NodeShape.Rectangle, label: label }
+          ShapeParse { found: true, shape: NodeShape.Rectangle, label: label }
         } else {
-          none
+          ShapeParse { found: false, shape: NodeShape.Rectangle, label: "" }
         }
       }
     }
@@ -242,19 +243,18 @@ cursor_parse_node_shape := (c: Cursor) -> ShapeParse {
 // ── Node reference parsing ────────────────────────────────────────────────────
 
 // Parse a node reference: an identifier optionally followed by a shape bracket.
-// Skips leading whitespace.  Returns a Node on success, or none if no
-// identifier is present.
+// Skips leading whitespace.  Returns node_bare("") if no identifier is present.
 //
 // A bare id (no bracket) produces a node whose label equals its id and whose
 // shape defaults to Rectangle.
 cursor_parse_node_ref := (c: Cursor) -> Node {
   cursor_skip_ws(c)
   node_id := cursor_match_node_id(c)
-  if (node_id == none) do {
-    none
+  if (node_id == "") do {
+    node_bare("")
   } else {
     sp := cursor_parse_node_shape(c)
-    if (sp != none) do {
+    if (sp.found) do {
       node_new(node_id, sp.label, sp.shape)
     } else {
       node_bare(node_id)
@@ -272,7 +272,7 @@ EdgePattern := struct {
 
 // All supported edge connector tokens, ordered longest-match first so that
 // e.g. "<-->" is tried before "-->".
-edge_patterns := () -> @[] {
+edge_patterns := () -> @[EdgePattern] {
   @[
     EdgePattern { token: "<-.->", etype: EdgeType.BidirDotted },
     EdgePattern { token: "<==>",  etype: EdgeType.BidirThick  },
@@ -287,14 +287,14 @@ edge_patterns := () -> @[] {
 }
 
 // Try to parse an edge connector at the current position (after skipping
-// horizontal whitespace).  Returns the matching EdgeType, or none if no
-// known connector is found.  The cursor is advanced past the matched token.
+// horizontal whitespace).  Returns the matching EdgeType, or EdgeType.None
+// if no known connector is found.  The cursor is advanced past the matched token.
 cursor_parse_edge_connector := (c: Cursor) -> EdgeType {
   cursor_skip_ws(c)
   patterns := edge_patterns()
-  result   := none
+  result   := EdgeType.None
   for ep in patterns do {
-    if (result == none and cursor_peek(c, ep.token)) do {
+    if (result == EdgeType.None and cursor_peek(c, ep.token)) do {
       c.pos  := c.pos + len(ep.token)
       result := ep.etype
     }
@@ -320,11 +320,11 @@ cursor_consume_newline := (c: Cursor) -> bool {
 
 // Try to parse an optional edge label of the form |text| at the current
 // position.  Skips leading whitespace, then looks for |.  Returns the
-// trimmed label text (possibly ""), or none if no | is found.
+// trimmed label text (possibly ""), or "" if no | is found.
 cursor_try_parse_edge_label := (c: Cursor) -> str {
   cursor_skip_ws(c)
   if (not cursor_consume(c, "|")) do {
-    none
+    ""
   } else {
     matched, text, end_pos := re_match("[^|\\n]+", c.src, c.pos)
     if (matched) do {
@@ -345,26 +345,26 @@ cursor_try_parse_edge_label := (c: Cursor) -> str {
 // label, and the target node reference.
 EdgeChainSeg := struct {
   etype:  EdgeType,
-  label:  str,     // none if no label
+  label:  str,
   target: Node
 }
 
 // Parse zero or more chained edge segments of the form:
 //   (connector [|label|] node_ref)*
 // Backtracks on failure; returns empty list if nothing matches.
-cursor_parse_edge_chain := (c: Cursor) -> @[] {
+cursor_parse_edge_chain := (c: Cursor) -> @[EdgeChainSeg] {
   segs := @[]
   done := false
   while (not done) do {
     saved := c.pos
     etype := cursor_parse_edge_connector(c)
-    if (etype == none) do {
+    if (etype == EdgeType.None) do {
       c.pos := saved
       done  := true
     } else {
       lbl    := cursor_try_parse_edge_label(c)
       target := cursor_parse_node_ref(c)
-      if (target == none) do {
+      if (target.id == "") do {
         c.pos := saved
         done  := true
       } else {
@@ -380,33 +380,33 @@ cursor_parse_edge_chain := (c: Cursor) -> @[] {
 
 // Carrier for the result of try_parse_edge_stmt: the collected nodes and edges.
 EdgeStmtResult := struct {
-  nodes: @[],
-  edges: @[]
+  nodes: @[Node],
+  edges: @[Edge]
 }
 
 // Insert node into list only when no node with the same id already exists
 // (first-definition-wins semantics).
-upsert_node := (nodes: @[], node: Node) -> _ {
-  matches := nodes | filter((n) -> { n.id == node.id })
+upsert_node := (nodes: @[Node], node: Node) -> _ {
+  matches := nodes | filter((n: Node) -> { n.id == node.id })
   if (len(matches) == 0) do {
     push(nodes, node)
   }
 }
 
 // Try to parse a full edge statement: source node_ref + one or more chain
-// segments.  Returns an EdgeStmtResult on success, or none on failure (cursor
-// is restored to saved position).
+// segments.  Returns an EdgeStmtResult (check len(res.nodes)==0 for failure).
+// On failure cursor is restored to saved position.
 cursor_try_parse_edge_stmt := (c: Cursor) -> EdgeStmtResult {
   saved  := c.pos
   source := cursor_parse_node_ref(c)
-  if (source == none) do {
+  if (source.id == "") do {
     c.pos := saved
-    none
+    EdgeStmtResult { nodes: @[], edges: @[] }
   } else {
     segs := cursor_parse_edge_chain(c)
     if (len(segs) == 0) do {
       c.pos := saved
-      none
+      EdgeStmtResult { nodes: @[], edges: @[] }
     } else {
       res_nodes := @[]
       res_edges := @[]
@@ -427,13 +427,13 @@ cursor_try_parse_edge_stmt := (c: Cursor) -> EdgeStmtResult {
 // ── Node statement ────────────────────────────────────────────────────────────
 
 // Try to parse a standalone node statement (a node reference with no following
-// edge connector).  Returns the Node on success, or none on failure.
+// edge connector).  Returns node_bare("") on failure.
 cursor_try_parse_node_stmt := (c: Cursor) -> Node {
   saved := c.pos
   node  := cursor_parse_node_ref(c)
-  if (node == none) do {
+  if (node.id == "") do {
     c.pos := saved
-    none
+    node_bare("")
   } else {
     node
   }
@@ -475,13 +475,13 @@ cursor_parse_subgraph_label := (c: Cursor) -> str {
 }
 
 // Try to parse a "direction XY" line inside a subgraph body.
-// Returns the Direction on success, or none if "direction" keyword not found.
-cursor_try_parse_subgraph_direction := (c: Cursor) -> Direction {
+// Returns the Direction on success, or Direction.TD if "direction" keyword not found.
+cursor_try_parse_subgraph_direction := (c: Cursor, found: bool) -> Direction {
   saved := c.pos
   cursor_skip_ws(c)
   if (not cursor_consume(c, "direction")) do {
     c.pos := saved
-    none
+    Direction.TD
   } else {
     cursor_skip_ws(c)
     d := cursor_match_direction(c)
@@ -498,18 +498,18 @@ cursor_try_parse_subgraph_direction := (c: Cursor) -> Direction {
 // Returns true if a statement was consumed, false otherwise.
 // Note: cursor_parse_subgraph_block is defined below (mutual recursion is
 // fine at the Rust level since both compile to module-level fns).
-cursor_parse_statement_into := (c: Cursor, nodes: @[], edges: @[], subgraphs: @[]) -> bool {
+cursor_parse_statement_into := (c: Cursor, nodes: @[Node], edges: @[Edge], subgraphs: @[Subgraph]) -> bool {
   cursor_skip_ws(c)
   if (cursor_eof(c)) do {
     false
   } else {
     sg := cursor_parse_subgraph_block(c)
-    if (sg != none) do {
+    if (sg.name != "") do {
       push(subgraphs, sg)
       true
     } else {
       res := cursor_try_parse_edge_stmt(c)
-      if (res != none) do {
+      if (len(res.nodes) > 0) do {
         for n in res.nodes do {
           upsert_node(nodes, n)
         }
@@ -521,7 +521,7 @@ cursor_parse_statement_into := (c: Cursor, nodes: @[], edges: @[], subgraphs: @[
         true
       } else {
         node := cursor_try_parse_node_stmt(c)
-        if (node != none) do {
+        if (node.id != "") do {
           upsert_node(nodes, node)
           cursor_skip_ws(c)
           cursor_consume_newline(c)
@@ -535,14 +535,14 @@ cursor_parse_statement_into := (c: Cursor, nodes: @[], edges: @[], subgraphs: @[
 }
 
 // Parse a subgraph block starting with the "subgraph" keyword.
-// Returns a Subgraph on success, or none if no subgraph is found.
+// Returns subgraph_new("") if no subgraph is found.
 // Recursive: calls cursor_parse_statement_into for inner statements.
 cursor_parse_subgraph_block := (c: Cursor) -> Subgraph {
   saved := c.pos
   cursor_skip_ws(c)
   if (not cursor_consume(c, "subgraph")) do {
     c.pos := saved
-    none
+    subgraph_new("")
   } else {
     // Guard: "subgraph" must not be immediately followed by an identifier char
     // (e.g., "subgraphFoo" is an identifier, not the subgraph keyword).
@@ -553,16 +553,14 @@ cursor_parse_subgraph_block := (c: Cursor) -> Subgraph {
     }
     if (id_follows) do {
       c.pos := saved
-      none
+      subgraph_new("")
     } else {
       name := cursor_parse_subgraph_label(c)
       cursor_skip_ws(c)
       cursor_consume_newline(c)
       sg  := subgraph_new(name)
-      dir := cursor_try_parse_subgraph_direction(c)
-      if (dir != none) do {
-        sg.direction := dir
-      }
+      dir := cursor_try_parse_subgraph_direction(c, false)
+      sg.direction := dir
       done := false
       while (not cursor_eof(c) and not done) do {
         cursor_skip_ws(c)
@@ -589,7 +587,8 @@ cursor_parse_subgraph_block := (c: Cursor) -> Subgraph {
 // ── Header parsing ────────────────────────────────────────────────────────────
 
 // Try to parse the optional "flowchart DIR" or "graph DIR" header line.
-// Returns the Direction on success, or none if no header is found.
+// Returns Direction.TD as default if no header is found.
+// The found_header bool is returned via a struct-like pattern in the caller.
 cursor_try_parse_header := (c: Cursor) -> Direction {
   saved := c.pos
   cursor_skip_ws_and_newlines(c)
@@ -599,7 +598,7 @@ cursor_try_parse_header := (c: Cursor) -> Direction {
   }
   if (not ok) do {
     c.pos := saved
-    none
+    Direction.TD
   } else {
     cursor_skip_ws(c)
     d := cursor_match_direction(c)
@@ -622,9 +621,7 @@ cursor_try_parse_header := (c: Cursor) -> Direction {
 cursor_parse_graph := (c: Cursor) -> Graph {
   g   := graph_new()
   dir := cursor_try_parse_header(c)
-  if (dir != none) do {
-    g.direction := dir
-  }
+  g.direction := dir
   while (not cursor_eof(c)) do {
     cursor_skip_ws(c)
     if (not cursor_eof(c)) do {

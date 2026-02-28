@@ -116,7 +116,7 @@ node_height  := 3
 //
 // Returns: StrList of all node ids in the computed linear order.
 
-greedy_fas_ordering := (g) -> StrList {
+greedy_fas_ordering := (g: Graph) -> StrList {
   all_nodes := gw_nodes(g)
   active    := node_set_from_str_list(all_nodes)
   out_deg   := deg_map_new()
@@ -251,7 +251,7 @@ greedy_fas_ordering := (g) -> StrList {
 //   reversed_edges — EdgePairList of (original_src, original_tgt) pairs
 //                    that were reversed during cycle removal
 
-remove_cycles := (g) -> {
+remove_cycles := (g: Graph) -> (Graph, EdgePairList) {
   if (gw_node_count(g) == 0) do {
     // Empty graph: return an empty copy with no reversed edges.
     empty_ep := edge_pair_list_new()
@@ -358,7 +358,7 @@ LayerAssignment := struct {
 //
 // Returns: LayerAssignment { layers, layer_count, reversed_edges }
 
-assign_layers := (g) -> LayerAssignment {
+assign_layers := (g: Graph) -> LayerAssignment {
   // Step 1: remove cycles — produces a DAG and records which edges were reversed.
   dag, reversed := remove_cycles(g)
 
@@ -447,7 +447,7 @@ AugmentedGraph := struct {
 //
 // Returns: AugmentedGraph { graph, layers, layer_count, dummy_edges }
 
-insert_dummy_nodes := (dag, la: LayerAssignment) -> AugmentedGraph {
+insert_dummy_nodes := (dag: Graph, la: LayerAssignment) -> AugmentedGraph {
 
   // ── Step 1: copy all nodes from the DAG into a fresh MutableGraph. ──────────
   mg    := mgraph_new()

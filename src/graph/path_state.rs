@@ -173,7 +173,7 @@ pub fn point_list_reversed(pl: PointList) -> PointList {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+mod tests_path_state {
     use super::*;
 
     // ── pos_to_key / key_to_x / key_to_y ────────────────────────────────────

@@ -39,11 +39,19 @@ pub struct EdgeData {
 ///
 /// Holds both the petgraph DiGraph (for topology algorithms) and a
 /// `HashMap<String, NodeIndex>` for O(1) node lookup by id.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Graph {
     pub digraph: PetGraph<NodeData, EdgeData>,
     /// Maps node id → petgraph NodeIndex.
     pub node_index: HashMap<String, NodeIndex>,
+}
+
+/// Manual PartialEq for Graph — compares node_index maps only (used by
+/// generated .hom code that derives PartialEq on structs containing Graph).
+impl PartialEq for Graph {
+    fn eq(&self, other: &Self) -> bool {
+        self.node_index == other.node_index
+    }
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────

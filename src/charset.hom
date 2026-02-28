@@ -131,6 +131,7 @@ box_chars_circle := (cs: CharSet) -> BoxChars {
 // Used to merge overlapping box-drawing characters at intersection points.
 
 Arms := struct {
+  valid: bool,
   up:    bool,
   down:  bool,
   left:  bool,
@@ -139,11 +140,11 @@ Arms := struct {
 
 // Construct an Arms value with explicit arm flags.
 arms_new := (up: bool, down: bool, left: bool, right: bool) -> Arms {
-  Arms { up: up, down: down, left: left, right: right }
+  Arms { valid: true, up: up, down: down, left: left, right: right }
 }
 
 // Decode a box-drawing character into its Arms.
-// Returns none for characters that are not recognised junction characters.
+// Returns Arms with valid=false for characters that are not recognised junction characters.
 arms_from_char := (c: str) -> Arms {
   match c {
     "─" => arms_new(false, false, true,  true)
@@ -160,7 +161,7 @@ arms_from_char := (c: str) -> Arms {
     "┴" => arms_new(true,  false, true,  true)
     "┼" => arms_new(true,  true,  true,  true)
     "+" => arms_new(true,  true,  true,  true)
-    _   => none
+    _   => Arms { valid: false, up: false, down: false, left: false, right: false }
   }
 }
 
@@ -168,6 +169,7 @@ arms_from_char := (c: str) -> Arms {
 // The result has an arm wherever either input has an arm.
 arms_merge := (a: Arms, b: Arms) -> Arms {
   Arms {
+    valid: true,
     up:    a.up    or b.up,
     down:  a.down  or b.down,
     left:  a.left  or b.left,
