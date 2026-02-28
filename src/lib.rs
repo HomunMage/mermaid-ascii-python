@@ -1609,36 +1609,10 @@ pub fn render_with_options(
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = "renderSvg")]
 pub fn render_svg(src: &str, padding: usize, direction: &str) -> Result<String, JsError> {
-    // Render as Unicode, wrap in SVG <text> for now (full SVG renderer TODO)
     let dir = if direction.is_empty() {
         None
     } else {
         Some(direction)
     };
-    let ascii = render_dsl(src, true, padding, dir).map_err(|e| JsError::new(&e))?;
-    let lines: Vec<&str> = ascii.trim_end().split('\n').collect();
-    let max_width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-    let height = lines.len();
-    let char_w: f64 = 9.6;
-    let char_h: f64 = 20.0;
-    let svg_w = (max_width as f64 * char_w + 40.0) as i64;
-    let svg_h = (height as f64 * char_h + 40.0) as i64;
-    let mut svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" viewBox="0 0 {svg_w} {svg_h}">"#
-    );
-    svg.push_str(r##"<rect width="100%" height="100%" fill="#0d1117"/>"##);
-    svg.push_str(r##"<text font-family="monospace" font-size="14" fill="#c9d1d9">"##);
-    for (i, line) in lines.iter().enumerate() {
-        let escaped = line
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;");
-        svg.push_str(&format!(
-            r#"<tspan x="20" y="{}">{}</tspan>"#,
-            20.0 + (i as f64 + 1.0) * char_h,
-            escaped
-        ));
-    }
-    svg.push_str("</text></svg>");
-    Ok(svg)
+    render_svg_dsl(src, padding, dir).map_err(|e| JsError::new(&e))
 }
