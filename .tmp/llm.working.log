@@ -5,3 +5,4 @@
 [W1] Added SVG renderer module: src/svg_renderer.rs with render() fn — takes NodeLayoutList + EdgeRouteList + direction + subgraph_members, produces geometry SVG; handles all shapes, edge types, subgraph borders, BT/RL transforms; declared as pub mod in src/lib.rs
 [W1] Added render_svg_dsl() public function: runs full layout pipeline (parse→build graph→cycle removal→layers→ordering→coords→route→transpose LR/RL), builds subgraph_members list, calls svg_renderer::render() — src/lib.rs
 [W1] Added --svg CLI flag: added use_svg bool to Cli struct, imported render_svg_dsl from lib, dispatch to render_svg_dsl when --svg flag set — src/main.rs
+[W1] Updated gen.sh for SVG: added --svg generation (.out.svg per .mm.md), SVG check loop against .expect.svg golden files, combined OVERALL_FAIL so both txt and svg checks run before exit — examples/gen.sh

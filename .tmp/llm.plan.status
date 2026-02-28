@@ -11,5 +11,5 @@
 - [x] Add --svg CLI flag — update src/main.rs with `--svg` flag that calls render_svg(), import render_svg from lib
 
 ## Phase 3: Test & Polish
-- [ ] Update gen.sh for SVG — add SVG generation (`--svg` flag) and checking against .expect.svg golden files
+- [x] Update gen.sh for SVG — add SVG generation (`--svg` flag) and checking against .expect.svg golden files
 - [ ] Update WASM SVG — replace fake text-wrapped SVG in render_svg WASM binding with real geometry-based SVG
