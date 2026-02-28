@@ -12,4 +12,4 @@
 
 ## Phase 3: Test & Polish
 - [x] Update gen.sh for SVG — add SVG generation (`--svg` flag) and checking against .expect.svg golden files
-- [ ] Update WASM SVG — replace fake text-wrapped SVG in render_svg WASM binding with real geometry-based SVG
+- [x] Update WASM SVG — replace fake text-wrapped SVG in render_svg WASM binding with real geometry-based SVG
