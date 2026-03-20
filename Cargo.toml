@@ -26,6 +26,10 @@ regex = "1"
 clap = { version = "4", features = ["derive"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
+[[test]]
+name = "test_examples"
+path = "tests/e2e/test_examples.rs"
+
 [profile.release]
 opt-level = "s"
 lto = true
