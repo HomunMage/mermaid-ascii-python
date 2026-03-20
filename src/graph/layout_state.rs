@@ -18,13 +18,13 @@
 //
 // ─── Exported types ─────────────────────────────────────────────────────────
 //
-//   DegMap      = Rc<RefCell<HashMap<String, i32>>>
+//   DegMap      = plain struct { inner: HashMap<String, i32> } (Clone)
 //     deg_map_new()            -> DegMap
-//     deg_map_set(dm, id, v)
+//     deg_map_set(dm, id, v)   -> DegMap   (returns modified copy)
 //     deg_map_get(dm, id)      -> i32   (0 if absent)
-//     deg_map_dec(dm, id)              (decrement by 1; floor at 0)
+//     deg_map_dec(dm, id)      -> DegMap   (decrement by 1; floor at 0)
 //     deg_map_max(dm)          -> i32   (max value; 0 if empty)
-//     deg_map_copy(dm)         -> DegMap  (deep-copy, independent clone)
+//     deg_map_copy(dm)         -> DegMap  (identity; hom's .clone() already deep-copies)
 //
 //   NodeSet     = Rc<RefCell<HashSet<String>>>
 //     node_set_from_str_list(sl) -> NodeSet
@@ -119,41 +119,47 @@ use std::collections::HashSet;
 
 // ── DegMap ────────────────────────────────────────────────────────────────────
 
-pub type DegMap = std::rc::Rc<std::cell::RefCell<HashMap<String, i32>>>;
-
-pub fn deg_map_new() -> DegMap {
-    std::rc::Rc::new(std::cell::RefCell::new(HashMap::new()))
+#[derive(Clone, Debug, PartialEq)]
+pub struct DegMap {
+    pub inner: HashMap<String, i32>,
 }
 
-pub fn deg_map_set(dm: DegMap, id: String, val: i32) {
-    dm.borrow_mut().insert(id, val);
+pub fn deg_map_new() -> DegMap {
+    DegMap { inner: HashMap::new() }
+}
+
+/// Insert/update `id → val` and return the modified DegMap.
+/// Use as: `dm = deg_map_set(dm, id, val)` in generated Rust.
+pub fn deg_map_set(mut dm: DegMap, id: String, val: i32) -> DegMap {
+    dm.inner.insert(id, val);
+    dm
 }
 
 pub fn deg_map_get(dm: DegMap, id: String) -> i32 {
-    *dm.borrow().get(&id).unwrap_or(&0)
+    *dm.inner.get(&id).unwrap_or(&0)
 }
 
-/// Decrement the degree for `id` by 1 (floor at 0).
-pub fn deg_map_dec(dm: DegMap, id: String) {
-    let mut map = dm.borrow_mut();
-    if let Some(v) = map.get_mut(&id) {
+/// Decrement the degree for `id` by 1 (floor at 0); return modified DegMap.
+pub fn deg_map_dec(mut dm: DegMap, id: String) -> DegMap {
+    if let Some(v) = dm.inner.get_mut(&id) {
         if *v > 0 {
             *v -= 1;
         }
     }
+    dm
 }
 
 /// Return the maximum value in the map, or 0 if the map is empty.
 /// Used by assign_layers to compute layer_count = max_layer + 1.
 pub fn deg_map_max(dm: DegMap) -> i32 {
-    dm.borrow().values().copied().max().unwrap_or(0)
+    dm.inner.values().copied().max().unwrap_or(0)
 }
 
-/// Return an independent deep copy of `dm` (new Rc<RefCell<...>> with cloned data).
-/// Used by insert_dummy_nodes to copy la.layers before adding dummy-node entries.
+/// Return `dm` unchanged.
+/// hom's call convention adds .clone() before calling, so this already
+/// produces an independent deep copy of the caller's DegMap.
 pub fn deg_map_copy(dm: DegMap) -> DegMap {
-    let snapshot: HashMap<String, i32> = dm.borrow().clone();
-    std::rc::Rc::new(std::cell::RefCell::new(snapshot))
+    dm
 }
 
 // ── NodeSet ───────────────────────────────────────────────────────────────────
@@ -388,10 +394,9 @@ pub fn gw_edges_full(g: Graph) -> EdgeInfoList {
 /// Return a StrList of all nodes in `active` whose out-degree is 0.
 pub fn fas_sinks(active: NodeSet, out_deg: DegMap) -> StrList {
     let active_ref = active.borrow();
-    let deg_ref = out_deg.borrow();
     let sinks: Vec<String> = active_ref
         .iter()
-        .filter(|id| *deg_ref.get(*id).unwrap_or(&0) == 0)
+        .filter(|id| *out_deg.inner.get(*id).unwrap_or(&0) == 0)
         .cloned()
         .collect();
     std::rc::Rc::new(std::cell::RefCell::new(sinks))
@@ -400,10 +405,9 @@ pub fn fas_sinks(active: NodeSet, out_deg: DegMap) -> StrList {
 /// Return a StrList of all nodes in `active` whose in-degree is 0.
 pub fn fas_sources(active: NodeSet, in_deg: DegMap) -> StrList {
     let active_ref = active.borrow();
-    let deg_ref = in_deg.borrow();
     let sources: Vec<String> = active_ref
         .iter()
-        .filter(|id| *deg_ref.get(*id).unwrap_or(&0) == 0)
+        .filter(|id| *in_deg.inner.get(*id).unwrap_or(&0) == 0)
         .cloned()
         .collect();
     std::rc::Rc::new(std::cell::RefCell::new(sources))
@@ -413,13 +417,11 @@ pub fn fas_sources(active: NodeSet, in_deg: DegMap) -> StrList {
 /// Returns "" if active is empty.
 pub fn fas_best_node(active: NodeSet, out_deg: DegMap, in_deg: DegMap) -> String {
     let active_ref = active.borrow();
-    let od = out_deg.borrow();
-    let id = in_deg.borrow();
     let mut best_id = String::new();
     let mut best_score = i32::MIN;
     for node_id in active_ref.iter() {
-        let score = od.get(node_id).copied().unwrap_or(0)
-            - id.get(node_id).copied().unwrap_or(0);
+        let score = out_deg.inner.get(node_id).copied().unwrap_or(0)
+            - in_deg.inner.get(node_id).copied().unwrap_or(0);
         if best_id.is_empty() || score > best_score {
             best_score = score;
             best_id = node_id.clone();
@@ -717,7 +719,7 @@ pub fn sort_layer_by_barycenter_outgoing(
 /// Return all keys in `dm`, sorted alphabetically.
 /// Used by minimise_crossings to produce a deterministic initial ordering.
 pub fn deg_map_sorted_keys(dm: DegMap) -> StrList {
-    let mut keys: Vec<String> = dm.borrow().keys().cloned().collect();
+    let mut keys: Vec<String> = dm.inner.keys().cloned().collect();
     keys.sort();
     std::rc::Rc::new(std::cell::RefCell::new(keys))
 }

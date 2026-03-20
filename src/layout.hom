@@ -127,8 +127,8 @@ greedy_fas_ordering := (g: Graph) -> StrList {
   i := 0
   while (i < n) {
     nid := str_list_get(all_nodes, i)
-    deg_map_set(out_deg, nid, gw_out_degree(g, nid))
-    deg_map_set(in_deg,  nid, gw_in_degree(g, nid))
+    out_deg := deg_map_set(out_deg, nid, gw_out_degree(g, nid))
+    in_deg  := deg_map_set(in_deg,  nid, gw_in_degree(g, nid))
     i := i + 1
   }
 
@@ -158,7 +158,7 @@ greedy_fas_ordering := (g: Graph) -> StrList {
           while (pi < pn) {
             pred := str_list_get(preds, pi)
             if (node_set_contains(active, pred)) {
-              deg_map_dec(out_deg, pred)
+              out_deg := deg_map_dec(out_deg, pred)
             }
             pi := pi + 1
           }
@@ -188,7 +188,7 @@ greedy_fas_ordering := (g: Graph) -> StrList {
           while (ssi < sn) {
             succ := str_list_get(succs, ssi)
             if (node_set_contains(active, succ)) {
-              deg_map_dec(in_deg, succ)
+              in_deg := deg_map_dec(in_deg, succ)
             }
             ssi := ssi + 1
           }
@@ -210,7 +210,7 @@ greedy_fas_ordering := (g: Graph) -> StrList {
       while (ssi < sn) {
         succ := str_list_get(succs, ssi)
         if (node_set_contains(active, succ)) {
-          deg_map_dec(in_deg, succ)
+          in_deg := deg_map_dec(in_deg, succ)
         }
         ssi := ssi + 1
       }
@@ -220,7 +220,7 @@ greedy_fas_ordering := (g: Graph) -> StrList {
       while (pi < pn) {
         pred := str_list_get(preds, pi)
         if (node_set_contains(active, pred)) {
-          deg_map_dec(out_deg, pred)
+          out_deg := deg_map_dec(out_deg, pred)
         }
         pi := pi + 1
       }
@@ -369,7 +369,7 @@ assign_layers := (g: Graph) -> LayerAssignment {
   ni     := 0
   while (ni < nn) {
     nid := str_list_get(nodes, ni)
-    deg_map_set(layers, nid, 0)
+    layers := deg_map_set(layers, nid, 0)
     ni := ni + 1
   }
 
@@ -387,7 +387,7 @@ assign_layers := (g: Graph) -> LayerAssignment {
       src_layer := deg_map_get(layers, src)
       tgt_layer := deg_map_get(layers, tgt)
       if (tgt_layer < src_layer + 1) {
-        deg_map_set(layers, tgt, src_layer + 1)
+        layers := deg_map_set(layers, tgt, src_layer + 1)
         changed := true
       }
       ei := ei + 1
@@ -507,7 +507,7 @@ insert_dummy_nodes := (dag: Graph, la: LayerAssignment) -> AugmentedGraph {
         // Add dummy node (empty label, Rectangle shape).
         mgraph_add_node_full(mg, dummy_id, "", "Rectangle")
         // Register dummy node's layer.
-        deg_map_set(layers, dummy_id, dummy_layer)
+        layers := deg_map_set(layers, dummy_id, dummy_layer)
         // Record the dummy id for later phases.
         str_list_push(dummy_ids, dummy_id)
 
