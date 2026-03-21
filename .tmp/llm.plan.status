@@ -12,7 +12,7 @@ Reference: pathfinder.hom already uses :: params with grid_data.rs/path_state.rs
 - [x] T4: Convert EdgePairList — Rc<RefCell<Vec<(String,String)>>> → plain struct with :: params. ~80 lines killed. Used 4 times in layout.hom (remove_cycles reversed edges).
 - [x] T5: Convert PosMap — Rc<RefCell<HashMap<String,i32>>> → plain struct with :: params. ~30 lines killed. Used 3 times in layout.hom (coordinate assignment).
 - [x] T6: Convert FloatMap — Rc<RefCell<HashMap<String,f32>>> → plain struct with :: params. ~30 lines killed. Used 2 times in layout.hom (barycenter averages).
-- [ ] T7: Convert IntList — Rc<RefCell<Vec<i32>>> → plain struct with :: params. ~30 lines killed. Used 12 times in layout.hom (layer widths, crossing counts).
+- [x] T7: Convert IntList — Rc<RefCell<Vec<i32>>> → plain struct with :: params. ~30 lines killed. Used 12 times in layout.hom (layer widths, crossing counts).
 
 ## Phase 2: Compound types (depend on Phase 1)
 
