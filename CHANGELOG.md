@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.15 — Kill `Rc<RefCell<>>`
+
+- Eliminate all `Rc<RefCell<>>` wrapper types in `layout_state.rs`, replacing with plain structs and return-value mutation
+- Convert 11 types: DegMap, NodeSet, StrList, EdgePairList, PosMap, FloatMap, IntList, EdgeInfoList, OrderingList, DummyEdgeList, MutableGraph
+- Remove ~900 lines of boilerplate wrapper code
+- Clean up dead code (`float_map_new`, `float_map_get_or_inf`)
+
+## v0.14 — Layout IR Refactor
+
+- Refactor layout pipeline into dedicated layout IR modules
+- Introduce `::` mutable-reference param convention (following `pathfinder.hom` pattern)
+- Add `.hom` source files for layout modules
+- Remove duplicated code, clean up module structure
+
+## v0.13 — Syntax Upgrade
+
+- Upgrade all Homun source files to latest `homunc` syntax
+- Adopt `::` namespace operator throughout codebase
+
+## v0.12 — SVG Renderer
+
+- Add real geometry-based SVG renderer (`render_svg_dsl`)
+- Add `--svg` CLI flag to `main.rs`
+- Update `gen.sh` to generate and verify SVG golden files
+
 ## v0.10 — Homun + Rust
 
 - Restructure to Homun (.hom) + Rust architecture
