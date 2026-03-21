@@ -150,7 +150,7 @@ greedy_fas_ordering := (g: Graph) -> StrList {
         while (si < sn) {
           sink  := str_list_get(sinks, si)
           active := node_set_remove(active, sink)
-          str_list_push(s2, sink)
+          s2 := str_list_push(s2, sink)
           // Update out-degree of predecessors still in active.
           preds := gw_predecessors(g, sink)
           pn    := str_list_len(preds)
@@ -180,7 +180,7 @@ greedy_fas_ordering := (g: Graph) -> StrList {
         while (si < srn) {
           src   := str_list_get(sources, si)
           active := node_set_remove(active, src)
-          str_list_push(s1, src)
+          s1 := str_list_push(s1, src)
           // Update in-degree of successors still in active.
           succs := gw_successors(g, src)
           sn    := str_list_len(succs)
@@ -202,7 +202,7 @@ greedy_fas_ordering := (g: Graph) -> StrList {
     if (node_set_len(active) > 0) {
       best  := fas_best_node(active, out_deg, in_deg)
       active := node_set_remove(active, best)
-      str_list_push(s1, best)
+      s1 := str_list_push(s1, best)
       // Update degrees of neighbours still in active.
       succs := gw_successors(g, best)
       sn    := str_list_len(succs)
@@ -228,7 +228,7 @@ greedy_fas_ordering := (g: Graph) -> StrList {
   }
 
   // Final ordering: s1 ++ reversed(s2).
-  str_list_extend_reversed(s1, s2)
+  s1 := str_list_extend_reversed(s1, s2)
   s1
 }
 
@@ -509,7 +509,7 @@ insert_dummy_nodes := (dag: Graph, la: LayerAssignment) -> AugmentedGraph {
         // Register dummy node's layer.
         layers := deg_map_set(layers, dummy_id, dummy_layer)
         // Record the dummy id for later phases.
-        str_list_push(dummy_ids, dummy_id)
+        dummy_ids := str_list_push(dummy_ids, dummy_id)
 
         // Intermediate segment edge carries no label.
         mgraph_add_edge_full(mg, chain_prev, dummy_id, etype, "")

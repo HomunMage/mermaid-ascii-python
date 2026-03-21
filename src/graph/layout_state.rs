@@ -32,12 +32,12 @@
 //     node_set_contains(ns, id)  -> bool
 //     node_set_len(ns)            -> i32
 //
-//   StrList     = Rc<RefCell<Vec<String>>>
+//   StrList     = plain struct { inner: Vec<String> } (Clone)
 //     str_list_new()             -> StrList
-//     str_list_push(sl, s)
+//     str_list_push(sl, s)       -> StrList   (returns modified copy)
 //     str_list_len(sl)           -> i32
 //     str_list_get(sl, idx)      -> String
-//     str_list_extend_reversed(dst, src)  // append reversed(src) to dst
+//     str_list_extend_reversed(dst, src)  -> StrList   // append reversed(src) to dst
 //
 //   EdgePairList = Rc<RefCell<Vec<(String, String)>>>
 //     edge_pair_list_new()       -> EdgePairList
@@ -170,10 +170,8 @@ pub struct NodeSet {
 }
 
 /// Build a NodeSet pre-populated from all elements of a StrList.
-pub fn node_set_from_str_list(
-    sl: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
-) -> NodeSet {
-    let set: HashSet<String> = sl.borrow().iter().cloned().collect();
+pub fn node_set_from_str_list(sl: StrList) -> NodeSet {
+    let set: HashSet<String> = sl.inner.iter().cloned().collect();
     NodeSet { inner: set }
 }
 
@@ -194,28 +192,36 @@ pub fn node_set_len(ns: NodeSet) -> i32 {
 
 // ── StrList ───────────────────────────────────────────────────────────────────
 
-pub type StrList = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
-
-pub fn str_list_new() -> StrList {
-    std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrList {
+    pub inner: Vec<String>,
 }
 
-pub fn str_list_push(sl: StrList, s: String) {
-    sl.borrow_mut().push(s);
+pub fn str_list_new() -> StrList {
+    StrList { inner: Vec::new() }
+}
+
+/// Push `s` onto the list and return the modified StrList.
+/// Use as: `sl = str_list_push(sl, s)` in generated Rust.
+pub fn str_list_push(mut sl: StrList, s: String) -> StrList {
+    sl.inner.push(s);
+    sl
 }
 
 pub fn str_list_len(sl: StrList) -> i32 {
-    sl.borrow().len() as i32
+    sl.inner.len() as i32
 }
 
 pub fn str_list_get(sl: StrList, idx: i32) -> String {
-    sl.borrow()[idx as usize].clone()
+    sl.inner[idx as usize].clone()
 }
 
-/// Append a reversed copy of `src` onto the end of `dst`.
-pub fn str_list_extend_reversed(dst: StrList, src: StrList) {
-    let rev: Vec<String> = src.borrow().iter().cloned().rev().collect();
-    dst.borrow_mut().extend(rev);
+/// Append a reversed copy of `src` onto `dst` and return the modified dst.
+/// Use as: `dst = str_list_extend_reversed(dst, src)` in generated Rust.
+pub fn str_list_extend_reversed(mut dst: StrList, src: StrList) -> StrList {
+    let rev: Vec<String> = src.inner.iter().cloned().rev().collect();
+    dst.inner.extend(rev);
+    dst
 }
 
 // ── EdgePairList ──────────────────────────────────────────────────────────────
@@ -278,11 +284,9 @@ pub fn edge_info_label(el: EdgeInfoList, idx: i32) -> String {
 pub type PosMap = std::rc::Rc<std::cell::RefCell<HashMap<String, i32>>>;
 
 /// Build a PosMap from a StrList ordering: position[ordering[i]] = i.
-pub fn pos_map_from_str_list(
-    ordering: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
-) -> PosMap {
+pub fn pos_map_from_str_list(ordering: StrList) -> PosMap {
     let map: HashMap<String, i32> = ordering
-        .borrow()
+        .inner
         .iter()
         .enumerate()
         .map(|(i, id)| (id.clone(), i as i32))
@@ -340,7 +344,7 @@ pub fn gw_node_count(g: Graph) -> i32 {
 
 pub fn gw_nodes(g: Graph) -> StrList {
     let ids = graph_nodes(&g);
-    std::rc::Rc::new(std::cell::RefCell::new(ids))
+    StrList { inner: ids }
 }
 
 pub fn gw_out_degree(g: Graph, id: String) -> i32 {
@@ -353,12 +357,12 @@ pub fn gw_in_degree(g: Graph, id: String) -> i32 {
 
 pub fn gw_successors(g: Graph, id: String) -> StrList {
     let ids = graph_successors(&g, &id);
-    std::rc::Rc::new(std::cell::RefCell::new(ids))
+    StrList { inner: ids }
 }
 
 pub fn gw_predecessors(g: Graph, id: String) -> StrList {
     let ids = graph_predecessors(&g, &id);
-    std::rc::Rc::new(std::cell::RefCell::new(ids))
+    StrList { inner: ids }
 }
 
 pub fn gw_node_label(g: Graph, id: String) -> String {
@@ -404,7 +408,7 @@ pub fn fas_sinks(active: NodeSet, out_deg: DegMap) -> StrList {
         .filter(|id| *out_deg.inner.get(*id).unwrap_or(&0) == 0)
         .cloned()
         .collect();
-    std::rc::Rc::new(std::cell::RefCell::new(sinks))
+    StrList { inner: sinks }
 }
 
 /// Return a StrList of all nodes in `active` whose in-degree is 0.
@@ -414,7 +418,7 @@ pub fn fas_sources(active: NodeSet, in_deg: DegMap) -> StrList {
         .filter(|id| *in_deg.inner.get(*id).unwrap_or(&0) == 0)
         .cloned()
         .collect();
-    std::rc::Rc::new(std::cell::RefCell::new(sources))
+    StrList { inner: sources }
 }
 
 /// Return the node in `active` with the highest (out_deg − in_deg) score.
@@ -466,11 +470,11 @@ pub fn dummy_edge_list_add(
     del: DummyEdgeList,
     orig_src: String,
     orig_tgt: String,
-    ids: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+    ids: StrList,
     etype: String,
     label: String,
 ) {
-    let ids_snapshot: Vec<String> = ids.borrow().clone();
+    let ids_snapshot: Vec<String> = ids.inner.clone();
     del.borrow_mut().push(DummyEdgeInfo {
         original_src: orig_src,
         original_tgt: orig_tgt,
@@ -495,7 +499,7 @@ pub fn dummy_edge_list_orig_tgt(del: DummyEdgeList, idx: i32) -> String {
 /// Return the dummy node IDs for the entry at `idx` as a new StrList.
 pub fn dummy_edge_list_dummy_ids(del: DummyEdgeList, idx: i32) -> StrList {
     let ids = del.borrow()[idx as usize].dummy_ids.clone();
-    std::rc::Rc::new(std::cell::RefCell::new(ids))
+    StrList { inner: ids }
 }
 
 pub fn dummy_edge_list_etype(del: DummyEdgeList, idx: i32) -> String {
@@ -522,15 +526,14 @@ pub type OrderingList = std::rc::Rc<std::cell::RefCell<Vec<StrList>>>;
 /// Create an OrderingList with `layer_count` empty layers.
 pub fn ordering_new(layer_count: i32) -> OrderingList {
     let layers: Vec<StrList> = (0..layer_count.max(0) as usize)
-        .map(|_| std::rc::Rc::new(std::cell::RefCell::new(Vec::new())))
+        .map(|_| StrList { inner: Vec::new() })
         .collect();
     std::rc::Rc::new(std::cell::RefCell::new(layers))
 }
 
 /// Append `node_id` to the layer at `layer_idx`.
 pub fn ordering_push(ol: OrderingList, layer_idx: i32, node_id: String) {
-    let layers = ol.borrow();
-    layers[layer_idx as usize].borrow_mut().push(node_id);
+    ol.borrow_mut()[layer_idx as usize].inner.push(node_id);
 }
 
 /// Return the number of layers.
@@ -560,7 +563,7 @@ pub fn ordering_count_crossings(ol: OrderingList, g: Graph) -> i32 {
 
     for l_idx in 0..layer_count.saturating_sub(1) {
         // Build position map for the next layer.
-        let tgt_layer = layers[l_idx + 1].borrow();
+        let tgt_layer = &layers[l_idx + 1].inner;
         let tgt_pos: HashMap<String, i32> = tgt_layer
             .iter()
             .enumerate()
@@ -568,7 +571,7 @@ pub fn ordering_count_crossings(ol: OrderingList, g: Graph) -> i32 {
             .collect();
 
         // Collect (src_position, tgt_position) for all inter-layer edges.
-        let src_layer = layers[l_idx].borrow();
+        let src_layer = &layers[l_idx].inner;
         let mut edges: Vec<(i32, i32)> = Vec::new();
 
         for (sp, src_id) in src_layer.iter().enumerate() {
@@ -609,7 +612,7 @@ pub fn float_map_new() -> FloatMap {
 /// Build a FloatMap from a StrList: position[id] = index as f32.
 pub fn float_map_from_str_list(sl: StrList) -> FloatMap {
     let map: HashMap<String, f32> = sl
-        .borrow()
+        .inner
         .iter()
         .enumerate()
         .map(|(i, id)| (id.clone(), i as f32))
@@ -690,14 +693,14 @@ pub fn sort_layer_by_barycenter_incoming(
     g: Graph,
     neighbor_pos: FloatMap,
 ) -> StrList {
-    let mut v: Vec<String> = layer.borrow().clone();
+    let mut v: Vec<String> = layer.inner.clone();
     let pos = neighbor_pos.borrow();
     v.sort_by(|a, b| {
         let fa = _barycenter_incoming(a.as_str(), &g, &pos);
         let fb = _barycenter_incoming(b.as_str(), &g, &pos);
         fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
     });
-    std::rc::Rc::new(std::cell::RefCell::new(v))
+    StrList { inner: v }
 }
 
 /// Sort a copy of `layer` by barycenter of outgoing neighbours in `neighbor_pos`.
@@ -707,14 +710,14 @@ pub fn sort_layer_by_barycenter_outgoing(
     g: Graph,
     neighbor_pos: FloatMap,
 ) -> StrList {
-    let mut v: Vec<String> = layer.borrow().clone();
+    let mut v: Vec<String> = layer.inner.clone();
     let pos = neighbor_pos.borrow();
     v.sort_by(|a, b| {
         let fa = _barycenter_outgoing(a.as_str(), &g, &pos);
         let fb = _barycenter_outgoing(b.as_str(), &g, &pos);
         fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
     });
-    std::rc::Rc::new(std::cell::RefCell::new(v))
+    StrList { inner: v }
 }
 
 // ── DegMap sorted keys ────────────────────────────────────────────────────────
@@ -724,7 +727,7 @@ pub fn sort_layer_by_barycenter_outgoing(
 pub fn deg_map_sorted_keys(dm: DegMap) -> StrList {
     let mut keys: Vec<String> = dm.inner.keys().cloned().collect();
     keys.sort();
-    std::rc::Rc::new(std::cell::RefCell::new(keys))
+    StrList { inner: keys }
 }
 
 // ── NodeLayoutList ──────────────────────────────────────────────────────────
