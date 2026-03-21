@@ -1,15 +1,14 @@
 // dep/layout_state.rs — Mutable state primitives for Sugiyama layout Phases 1–4.
 //
-// This companion file provides interior-mutable data structures needed by
-// layout.hom.  The .hom codegen wraps all variable arguments with `.clone()`.
-// For plain HashMap / HashSet / Vec, `.clone()` makes a deep copy — mutations
-// to the copy are lost.  Using Rc<RefCell<...>> means `.clone()` is a cheap
-// reference-count bump that still points to the SAME underlying data, so
-// mutations are visible through all clones.
+// Most types are plain structs with return-value mutation (mutating functions
+// return the modified value; call sites rebind).  A few types that are shared
+// across the lib.rs pipeline still use Rc<RefCell<>>: DummyEdgeList,
+// NodeLayoutList, EdgeRouteList.
 //
-// IMPORTANT: uses fully-qualified `std::rc::Rc` / `std::cell::RefCell` rather
-// than `use` statements to avoid E0252 "defined multiple times" when multiple
-// dep .rs files are inlined together by the homunc build system.
+// IMPORTANT: the Rc<RefCell<>> types use fully-qualified `std::rc::Rc` /
+// `std::cell::RefCell` rather than `use` statements to avoid E0252 "defined
+// multiple times" when multiple dep .rs files are inlined together by the
+// homunc build system.
 //
 // This file depends on Graph / graph_* functions from dep/graph.rs.
 // When compiled as part of the mermaid-hom crate, graph.rs is always included
@@ -104,9 +103,7 @@
 //
 //   FloatMap = plain struct { inner: HashMap<String, f32> }
 //     (Phase 4: barycenter position lookup)
-//     float_map_new()                          -> FloatMap
 //     float_map_from_str_list(sl)              -> FloatMap
-//     float_map_get_or_inf(fm, id)             -> f32   (f32::MAX if absent)
 //
 //   Barycenter sort helpers (Phase 4)
 //     sort_layer_by_barycenter_incoming(layer, g, neighbor_pos) -> StrList
@@ -611,10 +608,6 @@ pub fn ordering_count_crossings(ol: OrderingList, g: Graph) -> i32 {
 #[derive(Clone)]
 pub struct FloatMap { pub inner: HashMap<String, f32> }
 
-pub fn float_map_new() -> FloatMap {
-    FloatMap { inner: HashMap::new() }
-}
-
 /// Build a FloatMap from a StrList: position[id] = index as f32.
 pub fn float_map_from_str_list(sl: StrList) -> FloatMap {
     let map: HashMap<String, f32> = sl
@@ -624,11 +617,6 @@ pub fn float_map_from_str_list(sl: StrList) -> FloatMap {
         .map(|(i, id)| (id.clone(), i as f32))
         .collect();
     FloatMap { inner: map }
-}
-
-/// Return the value for `id`, or f32::MAX (used as "infinity") if absent.
-pub fn float_map_get_or_inf(fm: FloatMap, id: String) -> f32 {
-    *fm.inner.get(&id).unwrap_or(&f32::MAX)
 }
 
 // ── Barycenter helpers ────────────────────────────────────────────────────────
