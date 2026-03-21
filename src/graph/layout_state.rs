@@ -102,7 +102,7 @@
 //     ordering_set_layer(ol, idx: i32, layer)
 //     ordering_count_crossings(ol, g)          -> i32
 //
-//   FloatMap = Rc<RefCell<HashMap<String, f32>>>
+//   FloatMap = plain struct { inner: HashMap<String, f32> }
 //     (Phase 4: barycenter position lookup)
 //     float_map_new()                          -> FloatMap
 //     float_map_from_str_list(sl)              -> FloatMap
@@ -608,10 +608,11 @@ pub fn ordering_count_crossings(ol: OrderingList, g: Graph) -> i32 {
 // ── FloatMap ──────────────────────────────────────────────────────────────────
 // Phase 4: f32-valued HashMap for barycenter position lookups.
 
-pub type FloatMap = std::rc::Rc<std::cell::RefCell<HashMap<String, f32>>>;
+#[derive(Clone)]
+pub struct FloatMap { pub inner: HashMap<String, f32> }
 
 pub fn float_map_new() -> FloatMap {
-    std::rc::Rc::new(std::cell::RefCell::new(HashMap::new()))
+    FloatMap { inner: HashMap::new() }
 }
 
 /// Build a FloatMap from a StrList: position[id] = index as f32.
@@ -622,12 +623,12 @@ pub fn float_map_from_str_list(sl: StrList) -> FloatMap {
         .enumerate()
         .map(|(i, id)| (id.clone(), i as f32))
         .collect();
-    std::rc::Rc::new(std::cell::RefCell::new(map))
+    FloatMap { inner: map }
 }
 
 /// Return the value for `id`, or f32::MAX (used as "infinity") if absent.
 pub fn float_map_get_or_inf(fm: FloatMap, id: String) -> f32 {
-    *fm.borrow().get(&id).unwrap_or(&f32::MAX)
+    *fm.inner.get(&id).unwrap_or(&f32::MAX)
 }
 
 // ── Barycenter helpers ────────────────────────────────────────────────────────
@@ -699,10 +700,9 @@ pub fn sort_layer_by_barycenter_incoming(
     neighbor_pos: FloatMap,
 ) -> StrList {
     let mut v: Vec<String> = layer.inner.clone();
-    let pos = neighbor_pos.borrow();
     v.sort_by(|a, b| {
-        let fa = _barycenter_incoming(a.as_str(), &g, &pos);
-        let fb = _barycenter_incoming(b.as_str(), &g, &pos);
+        let fa = _barycenter_incoming(a.as_str(), &g, &neighbor_pos.inner);
+        let fb = _barycenter_incoming(b.as_str(), &g, &neighbor_pos.inner);
         fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
     });
     StrList { inner: v }
@@ -716,10 +716,9 @@ pub fn sort_layer_by_barycenter_outgoing(
     neighbor_pos: FloatMap,
 ) -> StrList {
     let mut v: Vec<String> = layer.inner.clone();
-    let pos = neighbor_pos.borrow();
     v.sort_by(|a, b| {
-        let fa = _barycenter_outgoing(a.as_str(), &g, &pos);
-        let fb = _barycenter_outgoing(b.as_str(), &g, &pos);
+        let fa = _barycenter_outgoing(a.as_str(), &g, &neighbor_pos.inner);
+        let fb = _barycenter_outgoing(b.as_str(), &g, &neighbor_pos.inner);
         fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
     });
     StrList { inner: v }
