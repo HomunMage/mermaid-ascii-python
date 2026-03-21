@@ -55,7 +55,7 @@
 //     edge_info_etype(el, idx)   -> String
 //     edge_info_label(el, idx)   -> String
 //
-//   PosMap      = Rc<RefCell<HashMap<String, i32>>>
+//   PosMap      = plain struct { inner: HashMap<String, i32> }
 //     pos_map_from_str_list(ordering) -> PosMap
 //     pos_map_get(pm, id)        -> i32   (-1 if absent)
 //
@@ -285,7 +285,8 @@ pub fn edge_info_label(el: EdgeInfoList, idx: i32) -> String {
 
 // ── PosMap ────────────────────────────────────────────────────────────────────
 
-pub type PosMap = std::rc::Rc<std::cell::RefCell<HashMap<String, i32>>>;
+#[derive(Clone)]
+pub struct PosMap { pub inner: HashMap<String, i32> }
 
 /// Build a PosMap from a StrList ordering: position[ordering[i]] = i.
 pub fn pos_map_from_str_list(ordering: StrList) -> PosMap {
@@ -295,12 +296,12 @@ pub fn pos_map_from_str_list(ordering: StrList) -> PosMap {
         .enumerate()
         .map(|(i, id)| (id.clone(), i as i32))
         .collect();
-    std::rc::Rc::new(std::cell::RefCell::new(map))
+    PosMap { inner: map }
 }
 
 /// Return the position of `id` in the ordering, or -1 if absent.
 pub fn pos_map_get(pm: PosMap, id: String) -> i32 {
-    *pm.borrow().get(&id).unwrap_or(&-1)
+    *pm.inner.get(&id).unwrap_or(&-1)
 }
 
 // ── MutableGraph ──────────────────────────────────────────────────────────────
